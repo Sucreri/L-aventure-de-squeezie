@@ -254,3 +254,8 @@ union all select 'clients', count(*) from users where 'client' = any(roles) and 
 union all select 'palettiers', count(*) from courier_profiles
 union all select 'waitlist', count(*) from waitlist_entries
 order by 1;
+
+-- Demonstration environment: simulated providers are allowed here, and only
+-- here. A production database keeps environment.allow_mock_providers = false
+-- and refuses them (migration 0017).
+update app_settings set value = 'true'::jsonb where key = 'environment.allow_mock_providers';

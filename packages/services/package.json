@@ -1,0 +1,9 @@
+{
+  "name": "@palette/services",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Orchestration layer. Calls the database (which enforces every compliance rule) and the external providers. Contains no business rule of its own.",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "postgres": "^3.4.5" }
+}
