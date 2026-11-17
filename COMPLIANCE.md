@@ -193,12 +193,15 @@ La base de données refuse de publier un document non validé :
 
 ## Résumé honnête de la couverture
 
+Décompte sur les 70 exigences de la partie 4, hors liste des 12 gabarits
+juridiques (tous en attente de validation) :
+
 | Statut | Nombre d'exigences |
 |--------|--------------------|
-| ✅ implémenté côté serveur et testé | 33 |
+| ✅ implémenté côté serveur et testé | 39 |
 | 🟡 partiel : base en place, partie applicative à venir | 18 |
-| ⬜ pas encore implémenté | 6 |
-| 📋 hors code, démarche de l'équipe | 14 |
+| ⬜ pas encore implémenté | 5 |
+| 📋 hors code, démarche de l'équipe | 8 |
 
 **Ce qui est solide aujourd'hui** : tout ce qui touche à l'âge, à l'alcool, aux
 promotions, au droit du travail, à la tarification, à la minimisation des
