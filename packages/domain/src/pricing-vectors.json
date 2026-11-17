@@ -1,0 +1,79 @@
+{
+  "_comment": "Shared test vectors. Consumed BOTH by the TypeScript tests and by scripts/check-parity.sh, which replays them against the SQL engine. Any divergence between the two implementations fails the suite.",
+  "settings": {
+    "base_fee_cents": 350,
+    "extra_pallet_fee_cents": 150,
+    "floor_fee_no_lift_cents": 50,
+    "floor_fee_with_lift_cents": 100,
+    "service_fee_cents": 49,
+    "grouped_round_discount": 0.4,
+    "surge_min": 1.0,
+    "surge_max": 1.5
+  },
+  "cases": [
+    {
+      "name": "exemple de reference du §9",
+      "pallets": 2, "floor": 3, "hasLift": false, "surge": 1.0, "mode": "express",
+      "expectedDeliveryCents": 650, "expectedServiceCents": 49
+    },
+    {
+      "name": "rez-de-chaussee, une palette",
+      "pallets": 1, "floor": 0, "hasLift": false, "surge": 1.0, "mode": "express",
+      "expectedDeliveryCents": 350, "expectedServiceCents": 49
+    },
+    {
+      "name": "commande sans palette (frais de base seuls)",
+      "pallets": 0, "floor": 0, "hasLift": false, "surge": 1.0, "mode": "express",
+      "expectedDeliveryCents": 350, "expectedServiceCents": 49
+    },
+    {
+      "name": "ascenseur : forfait quel que soit l etage",
+      "pallets": 1, "floor": 5, "hasLift": true, "surge": 1.0, "mode": "express",
+      "expectedDeliveryCents": 450, "expectedServiceCents": 49
+    },
+    {
+      "name": "ascenseur au 1er etage : meme forfait",
+      "pallets": 1, "floor": 1, "hasLift": true, "surge": 1.0, "mode": "express",
+      "expectedDeliveryCents": 450, "expectedServiceCents": 49
+    },
+    {
+      "name": "quatre palettes, 2e etage sans ascenseur",
+      "pallets": 4, "floor": 2, "hasLift": false, "surge": 1.0, "mode": "express",
+      "expectedDeliveryCents": 900, "expectedServiceCents": 49
+    },
+    {
+      "name": "tournee groupee : -40 % sur la livraison",
+      "pallets": 2, "floor": 3, "hasLift": false, "surge": 1.0, "mode": "grouped_round",
+      "expectedDeliveryCents": 390, "expectedServiceCents": 49
+    },
+    {
+      "name": "coefficient d affluence maximal",
+      "pallets": 2, "floor": 3, "hasLift": false, "surge": 1.5, "mode": "express",
+      "expectedDeliveryCents": 975, "expectedServiceCents": 49
+    },
+    {
+      "name": "coefficient intermediaire, arrondi au centime",
+      "pallets": 1, "floor": 1, "hasLift": false, "surge": 1.25, "mode": "express",
+      "expectedDeliveryCents": 500, "expectedServiceCents": 49
+    },
+    {
+      "name": "arrondi demi vers le haut",
+      "pallets": 1, "floor": 3, "hasLift": false, "surge": 1.13, "mode": "express",
+      "expectedDeliveryCents": 565, "expectedServiceCents": 49
+    },
+    {
+      "name": "planifiee : pas de reduction tournee",
+      "pallets": 2, "floor": 0, "hasLift": false, "surge": 1.0, "mode": "scheduled",
+      "expectedDeliveryCents": 500, "expectedServiceCents": 49
+    },
+    {
+      "name": "tournee groupee avec affluence",
+      "pallets": 3, "floor": 4, "hasLift": false, "surge": 1.2, "mode": "grouped_round",
+      "expectedDeliveryCents": 612, "expectedServiceCents": 49
+    }
+  ],
+  "invalidCases": [
+    { "name": "coefficient sous la borne basse", "pallets": 1, "floor": 0, "hasLift": false, "surge": 0.9, "mode": "express" },
+    { "name": "coefficient au-dessus de la borne haute", "pallets": 1, "floor": 0, "hasLift": false, "surge": 1.6, "mode": "express" }
+  ]
+}

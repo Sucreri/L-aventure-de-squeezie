@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+coverage/
+.expo/
+.next/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+supabase/.temp/
+*.tsbuildinfo

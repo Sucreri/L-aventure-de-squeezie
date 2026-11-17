@@ -1,0 +1,23 @@
+{
+  "name": "palette-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MVP de livraison de boissons et snacks à Louvain-la-Neuve (nom de travail : Palette)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types packages/domain/tests/*.test.ts",
+    "test:db": "scripts/test-db.sh",
+    "test:parity": "scripts/check-parity.sh",
+    "db:reset": "scripts/db-reset.sh --seed",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
