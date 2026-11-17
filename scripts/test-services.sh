@@ -8,4 +8,4 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/scripts/db-reset.sh" --seed >/dev/null
-exec node --test --experimental-strip-types "$ROOT"/packages/services/tests/*.test.ts
+exec node --test --test-concurrency=1 --experimental-strip-types "$ROOT"/packages/services/tests/*.test.ts

@@ -142,6 +142,8 @@ export interface Database {
     createMission(input: { storeId: string }): Promise<{ id: string }>;
     attachOrder(missionId: string, orderId: string): Promise<void>;
     offer(missionId: string, courierId: string, score: number): Promise<{ id: string }>;
+    /** Couriers already offered this mission, in any state. */
+    offeredCouriers(missionId: string): Promise<readonly string[]>;
     respondToOffer(offerId: string, status: 'accepted' | 'declined' | 'expired', reason?: string): Promise<void>;
     assign(missionId: string, courierId: string, shiftBookingId: string | null): Promise<void>;
     activeShiftBooking(courierId: string): Promise<string | null>;

@@ -117,3 +117,63 @@ export async function anyCourier(ctx: TestContext): Promise<string> {
     select user_id from courier_profiles where status = 'active' limit 1`;
   return row!['user_id'] as string;
 }
+
+/**
+ * Puts `count` demo couriers on an active shift in Biéreau, each with a
+ * recent position near the central store, so they become dispatch candidates.
+ *
+ * The working-time guards are time-of-day sensitive, and a test must not fail
+ * merely because it ran at 21:40. The fixture therefore widens the service-end
+ * and night-work parameters for the duration of the insert, then restores
+ * them — it never disables the guard itself.
+ */
+export async function couriersOnShift(
+  ctx: TestContext,
+  count = 3,
+): Promise<{ courierId: string; bookingId: string }[]> {
+  const saved = await ctx.sql`
+    select key, value from app_settings
+     where key in ('work.service_end_time', 'work.night_work_threshold_time')`;
+
+  await ctx.sql`
+    update app_settings set value = '"23:59"'::jsonb
+     where key in ('work.service_end_time', 'work.night_work_threshold_time')`;
+
+  const [shift] = await ctx.sql`
+    insert into shifts (zone_id, starts_at, ends_at, places, published_by,
+                        night_derogation, derogation_validated_by, derogation_note)
+    values (${DEMO.zoneBiereau}, now() - interval '1 hour', now() + interval '1 hour',
+            20, ${DEMO.admin}, true, ${DEMO.admin}, 'Fixture de test')
+    returning id`;
+
+  for (const row of saved) {
+    await ctx.sql`update app_settings set value = ${row['value'] as object}
+                   where key = ${row['key'] as string}`;
+  }
+
+  const couriers = await ctx.sql`
+    select user_id from courier_profiles where status = 'active'
+     order by created_at limit ${count}`;
+
+  const result: { courierId: string; bookingId: string }[] = [];
+
+  for (const [index, c] of couriers.entries()) {
+    const courierId = c['user_id'] as string;
+
+    const [booking] = await ctx.sql`
+      insert into shift_bookings (shift_id, courier_id)
+      values (${shift!['id']}, ${courierId})
+      on conflict (shift_id, courier_id) do update set cancelled_at = null
+      returning id`;
+
+    // Spread them out so their scores differ and the ordering is observable.
+    await ctx.sql`
+      insert into courier_positions (courier_id, shift_booking_id, lat, lon, recorded_at)
+      values (${courierId}, ${booking!['id']},
+              ${50.6695 + index * 0.0015}, ${4.6145 + index * 0.0015}, now())`;
+
+    result.push({ courierId, bookingId: booking!['id'] as string });
+  }
+
+  return result;
+}

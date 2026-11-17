@@ -53,7 +53,13 @@ interface PostgresError {
  * guards mention overlapping vocabulary.
  */
 const PATTERNS: readonly { test: RegExp; kind: RefusalKind; message: string }[] = [
-  { test: /age requirement not met|age check is required|age check did not pass/i,
+  // Two different situations mention "age". They must not share a message:
+  // one is about an article in the basket, the other about the check at the
+  // door. Telling a courier the wrong one sends them looking in the wrong place.
+  { test: /age check is required|age check did not pass|referenced age check|pin was verified before/i,
+    kind: 'delivery_checks_missing',
+    message: "Un contrôle d'âge validé est nécessaire avant de remettre de l'alcool." },
+  { test: /age requirement not met/i,
     kind: 'age',
     message: "L'âge requis n'est pas satisfait pour l'un des articles." },
   { test: /verified account|ordering requires a verified account|must hold a verified account/i,

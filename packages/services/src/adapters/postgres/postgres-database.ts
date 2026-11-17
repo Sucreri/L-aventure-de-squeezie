@@ -360,6 +360,11 @@ export function createPostgresDatabase(sql: Sql): Database {
           values (${missionId}, ${courierId}, ${score}) returning id`;
         return { id: row!['id'] as string };
       },
+      async offeredCouriers(missionId) {
+        const rows = await sql`
+          select courier_id from mission_offers where mission_id = ${missionId}`;
+        return rows.map(r => r['courier_id'] as string);
+      },
       async respondToOffer(offerId, status, reason) {
         await sql`
           update mission_offers

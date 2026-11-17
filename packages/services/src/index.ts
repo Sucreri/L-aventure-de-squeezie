@@ -25,3 +25,5 @@ export * from './errors.ts';
 export * from './usecases/place-order.ts';
 export * from './usecases/confirm-payment.ts';
 export * from './usecases/settle-ticket.ts';
+export * from './usecases/dispatch.ts';
+export * from './usecases/complete-delivery.ts';
