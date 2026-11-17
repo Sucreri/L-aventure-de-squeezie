@@ -21,6 +21,22 @@ type Sql = postgres.Sql<Record<string, unknown>>;
  * product is inactive or that store does not carry it. The order is refused as
  * a whole rather than quietly shrunk.
  */
+/**
+ * Raised when an order cannot be seen or changed by the current caller.
+ *
+ * Deliberately indistinguishable from "does not exist": telling someone that
+ * an order exists but is not theirs is itself a disclosure.
+ */
+export class OrderNotVisibleError extends Error {
+  readonly orderId: string;
+
+  constructor(orderId: string) {
+    super('Commande introuvable.');
+    this.name = 'OrderNotVisibleError';
+    this.orderId = orderId;
+  }
+}
+
 export class UnavailableProductsError extends Error {
   readonly productIds: readonly string[];
 
@@ -54,10 +70,26 @@ function toOrderRow(r: Record<string, unknown>): OrderRow {
   };
 }
 
+/**
+ * Runs `fn` atomically, whether or not we are already inside a transaction.
+ *
+ * postgres.js hands a transaction object that has `savepoint` but not `begin`,
+ * so an adapter that always calls `begin` breaks the moment a caller wraps it
+ * — which the API does, because every request runs in one transaction under
+ * the `authenticated` role.
+ */
+async function atomically<T>(sql: Sql, fn: (tx: Sql) => Promise<T>): Promise<T> {
+  const nested = sql as unknown as { savepoint?: (fn: (tx: Sql) => Promise<T>) => Promise<T> };
+
+  return typeof nested.savepoint === 'function'
+    ? nested.savepoint(tx => fn(tx))
+    : sql.begin(tx => fn(tx as unknown as Sql)) as Promise<T>;
+}
+
 export function createPostgresDatabase(sql: Sql): Database {
   const db: Database = {
     async transaction(fn) {
-      return sql.begin(async tx => fn(createPostgresDatabase(tx as unknown as Sql)));
+      return atomically(sql, tx => fn(createPostgresDatabase(tx)));
     },
 
     settings: {
@@ -93,7 +125,7 @@ export function createPostgresDatabase(sql: Sql): Database {
        * reproducible later, even if the address changes.
        */
       async place(input: PlaceOrderInput): Promise<OrderRow> {
-        return sql.begin(async tx => {
+        return atomically(sql, async tx => {
           // Pallet count and estimated item total come from the catalogue, at
           // the store's current indicative prices.
           const productIds = input.lines.map(l => l.productId);
@@ -207,10 +239,22 @@ export function createPostgresDatabase(sql: Sql): Database {
         return row ? toOrderRow(row) : null;
       },
 
+      /**
+       * Changes an order's status.
+       *
+       * Checks that a row was actually affected. Under Row Level Security an
+       * UPDATE that matches nothing succeeds silently, so without this check
+       * a client trying to move someone else's order would be told it worked
+       * while nothing happened.
+       */
       async setStatus(orderId: string, status: OrderStatus, actor: Actor) {
-        await sql.begin(async tx => {
+        await atomically(sql, async tx => {
           await tx`select app.set_actor(${actor.id}, ${actor.role}, ${actor.reason ?? null})`;
-          await tx`update orders set status = ${status} where id = ${orderId}`;
+          const result = await tx`update orders set status = ${status} where id = ${orderId}`;
+
+          if (result.count === 0) {
+            throw new OrderNotVisibleError(orderId);
+          }
         });
       },
 
@@ -263,13 +307,16 @@ export function createPostgresDatabase(sql: Sql): Database {
     },
 
     payments: {
+      /**
+       * Goes through app.register_payment rather than writing the row: RLS
+       * grants no INSERT on `payments`, and the function checks ownership,
+       * order state, amount and idempotency.
+       */
       async insert(input): Promise<PaymentRow> {
         const [row] = await sql`
-          insert into payments (order_id, provider, provider_ref, method, status,
-                                amount_authorized_cents, idempotency_key)
-          values (${input.orderId}, ${input.provider}, ${input.providerRef}, ${input.method},
-                  'pending', ${input.amountAuthorizedCents}, ${input.idempotencyKey})
-          returning *`;
+          select (app.register_payment(
+            ${input.orderId}, ${input.provider}, ${input.providerRef}, ${input.method},
+            ${input.amountAuthorizedCents}, ${input.idempotencyKey})).*`;
         return {
           id: row!['id'] as string,
           orderId: row!['order_id'] as string,

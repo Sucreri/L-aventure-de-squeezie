@@ -15,9 +15,11 @@
     "test:services": "scripts/test-services.sh",
     "test:db": "scripts/test-db.sh",
     "test:parity": "scripts/check-parity.sh",
-    "test:all": "npm test && npm run test:db && npm run test:parity && npm run test:services",
+    "test:all": "npm test && npm run test:db && npm run test:parity && npm run test:services && npm run test:api",
     "db:reset": "scripts/db-reset.sh --seed",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:api": "scripts/test-api.sh",
+    "dev:api": "node --experimental-strip-types apps/api/src/main.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.2"
