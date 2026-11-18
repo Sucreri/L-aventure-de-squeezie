@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Palette",
+    "slug": "palette",
+    "scheme": "palette",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": true, "bundleIdentifier": "invalid.placeholder.palette" },
+    "android": { "package": "invalid.placeholder.palette" },
+    "web": { "bundler": "metro", "output": "single" },
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": false }
+  }
+}

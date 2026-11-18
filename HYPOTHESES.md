@@ -95,6 +95,7 @@ Statuts : `OUVERT` (réponse attendue) · `HYPOTHÈSE` (choix pris, réversible)
 | H-18 | Le coefficient d'affluence `c` est borné à **[1,00 ; 1,50]** par une contrainte de base de données, identique pour tous les clients d'une zone au même instant, et journalisé à chaque changement. | §9. Un coefficient personnalisé serait une pratique commerciale déloyale. | Non réversible. |
 | H-19 | Le libellé du bouton de paiement est le paramètre `checkout.pay_button_label`, valeur par défaut « Commander et payer », et une contrainte interdit une valeur qui ne contient pas un verbe de paiement. | §4.6, obligation d'un libellé sans ambiguïté sur l'obligation de payer. | Paramètre borné. |
 | H-20 | Les comptes inactifs sont supprimés après **24 mois**, avec préavis par e-mail 30 jours avant, par une tâche automatique journalisée. | §4.7. | Paramètre. |
+| H-21 | Le jeton de session n'est **pas persisté** côté client : il vit en mémoire et une actualisation de page oblige à se reconnecter. | Écrire un jeton porteur dans le stockage du navigateur l'expose à toute faille XSS. En production, c'est Supabase Auth qui détient la session, avec un jeton de rafraîchissement et une rotation : le mécanisme actuel n'est qu'un substitut en attendant le projet Supabase. Ne pas le persister maintenant évite d'inscrire une mauvaise habitude dans le code. | Remplacé par Supabase Auth. |
 
 ---
 

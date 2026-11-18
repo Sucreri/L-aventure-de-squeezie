@@ -566,6 +566,66 @@ export function buildRouter(deps: ServerDeps): Router {
       return { status: 201, body: { rated: true } };
     }));
 
+  // ---------------------------------------------------------------- simulation
+
+  /**
+   * Completes a payment with the SIMULATED provider.
+   *
+   * The real flow sends the client to the provider's own page for strong
+   * customer authentication, and the provider then calls the webhook. The
+   * simulated provider has no such page, so this route stands in for it —
+   * which is the only way the app can be exercised end to end before a Mollie
+   * or Stripe contract exists.
+   *
+   * It is refused unless environment.allow_mock_providers is true, the same
+   * lock that stops a production database from recording simulated payments
+   * at all (migration 0017). A production deployment therefore has no such
+   * route in practice, even if it is compiled in.
+   */
+  router.post('/dev/simulate-payment', async ctx =>
+    withUser(ctx, async (db, userId, tx) => {
+      if (!(await db.settings.bool('environment.allow_mock_providers'))) {
+        throw forbidden('La simulation de paiement est désactivée sur cet environnement.');
+      }
+
+      const orderId = field(ctx.body, 'orderId');
+
+      // RLS applies: a client can only simulate payment of their own order.
+      const [order] = await tx`
+        select id, client_id, total_estimated_cents from orders where id = ${orderId}`;
+      if (!order) throw notFound('Commande introuvable.');
+      if (order['client_id'] !== userId) throw notFound('Commande introuvable.');
+
+      const [payment] = await tx`
+        select provider_ref, amount_authorized_cents from payments
+         where order_id = ${orderId} order by created_at desc limit 1`;
+      if (!payment) throw badRequest('Aucun paiement à simuler pour cette commande.');
+
+      const providerRef = payment['provider_ref'] as string;
+      const amountCents = Number(payment['amount_authorized_cents']);
+
+      const mock = deps.payments as unknown as {
+        completeAuthentication?: (ref: string, ok?: boolean) => unknown;
+        buildWebhook?: (event: Record<string, unknown>) => { body: string; signature: string };
+      };
+
+      if (!mock.completeAuthentication || !mock.buildWebhook) {
+        throw forbidden("Le prestataire configuré n'est pas simulable.");
+      }
+
+      mock.completeAuthentication(providerRef, true);
+      const webhook = mock.buildWebhook({
+        providerRef, status: 'authorized', amountCents, scaCompleted: true,
+      });
+
+      // Same path as a real provider callback, signature included.
+      const outcome = await withServiceRole(serviceDb =>
+        handlePaymentWebhook({ db: serviceDb, payments: deps.payments },
+                             webhook.body, webhook.signature));
+
+      return { status: 200, body: { simulated: true, ...outcome } };
+    }));
+
   // ---------------------------------------------------------------- webhooks
 
   /**

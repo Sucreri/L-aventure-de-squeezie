@@ -40,9 +40,13 @@ const router = buildRouter({
   publicBaseUrl,
 });
 
-const server = createServer(createRequestListener(router, error => {
+const allowedOrigins = (process.env['ALLOWED_ORIGINS'] ?? '')
+  .split(',').map(o => o.trim()).filter(Boolean);
+
+const server = createServer(createRequestListener(router, {
+  allowedOrigins,
   // Spec 4.7: no personal data in logs.
-  console.error('[api] erreur interne :', (error as Error).message);
+  onError: error => console.error('[api] erreur interne :', (error as Error).message),
 }));
 
 server.listen(port, () => {

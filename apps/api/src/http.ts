@@ -114,19 +114,54 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-export function createRequestListener(router: Router, onError?: (e: unknown) => void) {
+export interface ListenerOptions {
+  /**
+   * Origins allowed to call this API from a browser.
+   *
+   * An allowlist, never '*': the API is called with a bearer token, and a
+   * wildcard would let any page on the internet make authenticated calls on
+   * behalf of someone who is signed in.
+   */
+  readonly allowedOrigins?: readonly string[];
+  readonly onError?: (error: unknown) => void;
+}
+
+export function createRequestListener(router: Router, options: ListenerOptions | ((e: unknown) => void) = {}) {
+  const resolved: ListenerOptions = typeof options === 'function' ? { onError: options } : options;
+  const allowedOrigins = resolved.allowedOrigins ?? [];
+  const onError = resolved.onError;
+
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+
+    const origin = typeof req.headers['origin'] === 'string' ? req.headers['origin'] : null;
+    const corsHeaders: Record<string, string> = origin && allowedOrigins.includes(origin)
+      ? {
+          'access-control-allow-origin': origin,
+          'access-control-allow-headers': 'content-type, authorization',
+          'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+          'access-control-max-age': '600',
+          // The allowlist varies by origin, so caches must not reuse a response.
+          'vary': 'Origin',
+        }
+      : {};
 
     const send = (status: number, body: unknown, headers: Record<string, string> = {}) => {
       const payload = body === undefined ? '' : JSON.stringify(body);
       res.writeHead(status, {
         'content-type': 'application/json; charset=utf-8',
         'cache-control': 'no-store',
+        ...corsHeaders,
         ...headers,
       });
       res.end(payload);
     };
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders);
+      res.end();
+      return;
+    }
 
     try {
       const matched = router.match(req.method ?? 'GET', url.pathname);

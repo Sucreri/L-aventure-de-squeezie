@@ -23,13 +23,19 @@ l'application, est lui aussi refusé.
 ## Comment exécuter les vérifications
 
 ```bash
+npm run test:all             # enchaîne les cinq suites ci-dessous
+
 scripts/db-reset.sh --seed   # reconstruit la base et charge les données de démonstration
-scripts/test-db.sh           # 98 assertions d'acceptation (partie 4 et §20)
 npm test                     # 84 tests du paquet domaine
+scripts/test-db.sh           # 98 assertions d'acceptation (partie 4 et §20)
 scripts/check-parity.sh      # 24 vérifications de parité SQL ↔ TypeScript
+scripts/test-services.sh     # 45 tests d'intégration de la couche service
+scripts/test-api.sh          # 34 tests de l'API, sous Row Level Security réelle
+scripts/test-app.sh          # 29 vérifications du parcours client, dans un navigateur
 ```
 
-État au moment de la rédaction : **98 + 84 + 24 = 206 vérifications, toutes au vert.**
+État au moment de la rédaction : **84 + 98 + 24 + 45 + 34 + 29 = 314 vérifications,
+toutes au vert.**
 
 ---
 
@@ -44,7 +50,7 @@ scripts/check-parity.sh      # 24 vérifications de parité SQL ↔ TypeScript
 | C-ALC-05 | Interdiction de remettre de l'alcool à une personne manifestement ivre | `age_refusal_reason = 'visibly_intoxicated'`, `chk_ok_requires_both_boxes` (la case « personne en état normal » est obligatoire pour un contrôle positif) | `20.3` « un contrôle "ok" sans pièce vérifiée est refusé », « un refus bascule en DELIVERY_FAILED » | ✅ |
 | C-ALC-06 | Jamais d'alcool offert, de réduction sur l'alcool, ni de réduction liée à la quantité d'alcool | `promotion_target` (enum sans produit) + liste blanche `app.allowed_promotion_condition_keys()` + `trg_promotion_rule` — `0011_growth_promotions.sql` | `20.4` (7 assertions) ; `promotions.test.ts` (13 tests) | ✅ |
 | C-ALC-07 | Tout produit alcoolisé est identifié comme tel, avec son degré | `chk_alcohol_is_declared` ; `app.catalogue_for_user()` renvoie `alcohol_notice` | `20.2`, et contrainte testée en `0005` | ✅ |
-| C-ALC-08 | Les produits sans alcool apparaissent en premier | `app.catalogue_for_user()` trie `contains_alcohol asc` | — (couvert par la fonction ; test d'affichage au lot UI) | 🟡 |
+| C-ALC-08 | Les produits sans alcool apparaissent en premier | `app.catalogue_for_user()` trie `contains_alcohol asc` ; affichage dans `apps/mobile/app/catalogue.tsx` | Parcours navigateur : « les produits sans alcool apparaissent en premier » | ✅ |
 | C-ALC-09 | Un produit `age_minimum = 18` ne peut pas être activé dans le MVP | `chk_no_18_plus_in_mvp` — contrainte de base de données | `20.12` « un produit 18+ existe mais reste inactif » | ✅ |
 
 ## 4.2 Publicité et communication
@@ -104,7 +110,7 @@ scripts/check-parity.sh      # 24 vérifications de parité SQL ↔ TypeScript
 | C-CON-01 | Identité complète de l'Opérateur et moyens de contact, visibles avant toute commande | Paramètres `operator.*`, tous `required_for_launch` ; `app.launch_blockers()` bloque l'ouverture d'une zone | `20.10` « un quartier n'ouvre pas tant qu'un paramètre de lancement manque » | ✅ |
 | C-CON-02 | Prix total TTC, tous frais compris, affiché avant l'engagement | `chk_total_is_sum` sur `orders` ; `app.compute_delivery_fee()` | `20.5` (8 assertions) ; `pricing.test.ts` (22 tests) | ✅ |
 | C-CON-03 | Le coefficient d'affluence est annoncé clairement et borné | `orders.surge_coefficient` ; bornes `pricing.surge_min/max` vérifiées côté serveur | `20.5` « un coefficient hors bornes est refusé » | ✅ |
-| C-CON-04 | Bouton de commande au libellé sans ambiguïté | Paramètre `checkout.pay_button_label` | ⬜ affichage au lot UI | 🟡 |
+| C-CON-04 | Bouton de commande au libellé sans ambiguïté | Paramètre `checkout.pay_button_label`, affiché par `recapitulatif.tsx`, avec le montant répété à côté | Parcours navigateur : « le libellé du bouton lève toute ambiguïté » et « le montant exact à payer est répété » | ✅ |
 | C-CON-05 | Confirmation de commande sur support durable (e-mail) | ⬜ lot notifications | — | ⬜ |
 | C-CON-06 | CGV accessibles avant la commande ; la version acceptée est stockée | `consents.legal_document_id` + `chk_document_required_for_terms` ; `orders.sales_terms_document_id` | `20.11/e2e` (la commande fige la version des CGV) | ✅ |
 | C-CON-07 | Droit de rétractation et exceptions, affichés avant paiement | Paramètre `consumer.withdrawal_policy_text`, `required_for_launch` — **en attente de Q-08** | `20.10` (bloque l'ouverture s'il manque) | 🟡 |
@@ -146,11 +152,20 @@ scripts/check-parity.sh      # 24 vérifications de parité SQL ↔ TypeScript
 
 | ID | Exigence | Implémentation | Test | Statut |
 |----|----------|----------------|------|--------|
-| C-A11Y-01 | WCAG 2.1 niveau AA : contrastes, zones tactiles ≥ 44 px, lecteurs d'écran, textes alternatifs | ⬜ **lot UI — rien n'est encore implémenté** | — | ⬜ |
+| C-A11Y-01 | WCAG 2.1 niveau AA : contrastes, zones tactiles ≥ 44 px, lecteurs d'écran, textes alternatifs | Jetons de couleur vérifiés à 4,5:1 minimum (`src/theme.ts`) ; zones tactiles à 48 px ; chaque champ porte un libellé lié ; rôles et états ARIA explicites (`aria-checked`, `aria-disabled`, `aria-busy`, `role="alert"`, `role="progressbar"`) ; aucune information portée par la seule couleur | Parcours navigateur : les champs sont atteints par leur libellé, les états des cases sont lus | 🟡 |
 
-> Point d'honnêteté : l'accessibilité ne peut pas être traitée au niveau de la
-> base de données. Elle est entièrement devant nous, et doit être intégrée dès
-> le premier écran plutôt que rattrapée après coup.
+> Point d'honnêteté. L'app cliente a été construite avec l'accessibilité
+> intégrée dès le premier écran plutôt que rattrapée ensuite, et le parcours
+> automatisé atteint chaque champ par son libellé — ce qui ne fonctionnerait
+> pas si l'étiquetage était absent. Un défaut réel a d'ailleurs été trouvé
+> ainsi : React Native Web n'émettait pas `aria-checked`, ce qui rend une case
+> à cocher inintelligible pour un lecteur d'écran.
+>
+> Cela ne vaut pas conformité AA. Il manque un audit avec de vrais lecteurs
+> d'écran (VoiceOver, TalkBack), la navigation au clavier sur le back-office,
+> la gestion du focus entre écrans, le respect des préférences système de
+> taille de texte et de mouvement réduit, et le mode sombre. Le statut reste
+> donc partiel.
 
 ## 4.10 Marques et contenus
 
@@ -198,9 +213,9 @@ juridiques (tous en attente de validation) :
 
 | Statut | Nombre d'exigences |
 |--------|--------------------|
-| ✅ implémenté côté serveur et testé | 39 |
-| 🟡 partiel : base en place, partie applicative à venir | 18 |
-| ⬜ pas encore implémenté | 5 |
+| ✅ implémenté et testé | 41 |
+| 🟡 partiel : base en place, partie applicative à venir | 17 |
+| ⬜ pas encore implémenté | 4 |
 | 📋 hors code, démarche de l'équipe | 8 |
 
 **Ce qui est solide aujourd'hui** : tout ce qui touche à l'âge, à l'alcool, aux
