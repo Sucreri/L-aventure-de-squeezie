@@ -25,10 +25,11 @@ import postgres from 'postgres';
 import {
   createPostgresDatabase, placeOrder, handlePaymentWebhook,
   type Database, type AgeVerificationProvider, type PaymentProvider,
-  type Clock, systemClock, RuleRefusedError,
+  type ReceiptReader, type Clock, systemClock, RuleRefusedError,
 } from '@palette/services';
 import { Router, badRequest, unauthorized, notFound, forbidden, type RequestContext } from './http.ts';
 import { issueToken, verifyToken, InvalidTokenError } from './auth.ts';
+import { registerCourierRoutes } from './courier-routes.ts';
 
 type Sql = postgres.Sql<Record<string, unknown>>;
 
@@ -36,6 +37,8 @@ export interface ServerDeps {
   readonly sql: Sql;
   readonly payments: PaymentProvider;
   readonly ageVerification: AgeVerificationProvider;
+  /** Needed by the courier side, which settles till receipts. */
+  readonly receipts: ReceiptReader;
   readonly clock?: Clock;
   readonly tokenSecret: string;
   readonly publicBaseUrl: string;
@@ -650,6 +653,16 @@ export function buildRouter(deps: ServerDeps): Router {
       }
       throw error;
     }
+  });
+
+  // The courier side lives in its own module; it shares withUser, so every
+  // courier route runs under Row Level Security exactly like the client ones.
+  registerCourierRoutes(router, {
+    clock,
+    receipts: deps.receipts,
+    payments: deps.payments,
+    withUser: (routeCtx, fn) => withUser(routeCtx, (db, userId) => fn(db, userId)),
+    withServiceRole: fn => withServiceRole(db => fn(db)),
   });
 
   return router;

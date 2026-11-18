@@ -268,7 +268,8 @@ export async function arriveAtStore(
         }));
       }
 
-      await deps.db.courier.setMissionStatus(input.missionId, 'at_store');
+      // The mission follows its orders automatically (migration 0018), so
+      // there is nothing to set here.
       return { step: 'shop' as const };
     });
 
@@ -366,7 +367,6 @@ export async function recordReceipt(
       await refusalAware(() => deps.db.orders.setStatus(input.orderId, 'PURCHASED', {
         id: input.courierId, role: 'courier', reason: 'articles achetés, ticket validé',
       }));
-      await deps.db.courier.setMissionStatus(input.missionId, 'purchased');
 
       return { ...outcome, step: 'travel' as const };
     });
@@ -376,7 +376,7 @@ export async function recordReceipt(
 
 export async function departForDelivery(
   deps: CourierDeps,
-  input: { courierId: string; missionId: string; orderId: string; actionId?: string },
+  input: { courierId: string; missionId?: string; orderId: string; actionId?: string },
 ): Promise<{ step: MissionStep }> {
   const { result } = await idempotent(
     deps, { ...(input.actionId ? { actionId: input.actionId } : {}), courierId: input.courierId, kind: 'depart' },
@@ -384,7 +384,6 @@ export async function departForDelivery(
       await refusalAware(() => deps.db.orders.setStatus(input.orderId, 'EN_ROUTE', {
         id: input.courierId, role: 'courier', reason: 'départ vers le kot',
       }));
-      await deps.db.courier.setMissionStatus(input.missionId, 'en_route');
       return { step: 'handover' as const };
     });
 

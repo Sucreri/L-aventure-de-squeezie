@@ -412,6 +412,11 @@ export function createPostgresDatabase(sql: Sql): Database {
           select courier_id from mission_offers where mission_id = ${missionId}`;
         return rows.map(r => r['courier_id'] as string);
       },
+      async missionOrderIds(missionId) {
+        const rows = await sql`
+          select order_id from mission_orders where mission_id = ${missionId}`;
+        return rows.map(r => r['order_id'] as string);
+      },
       async respondToOffer(offerId, status, reason) {
         await sql`
           update mission_offers
@@ -444,8 +449,20 @@ export function createPostgresDatabase(sql: Sql): Database {
             ${input.reason ?? null}, ${input.documentChecked}, ${input.sober}) as id`;
         return { id: row!['id'] as string };
       },
+      /**
+       * Hands the order over.
+       *
+       * Runs inside its own savepoint, because a refusal here is EXPECTED and
+       * the caller continues: a missing age check or a wrong PIN is the
+       * system working, not a crash. Without the savepoint the enclosing
+       * transaction — the whole HTTP request — would be left aborted, and the
+       * commit would fail even though the error was handled. The courier
+       * would get a 500 at someone's door instead of "wrong PIN".
+       */
       async deliver(orderId, courierId, pin) {
-        await sql`select app.deliver_order(${orderId}, ${courierId}, ${pin})`;
+        await atomically(sql, async tx => {
+          await tx`select app.deliver_order(${orderId}, ${courierId}, ${pin})`;
+        });
       },
       async saveReceipt(input) {
         await sql`
@@ -476,30 +493,21 @@ export function createPostgresDatabase(sql: Sql): Database {
       /**
        * Applying as a courier.
        *
-       * The capacity comes from the parameter for the declared transport, not
-       * from the applicant: spec 14 fixes it per transport mode, and letting
-       * someone claim their own capacity would let them take more than they
-       * can carry.
+       * Goes through app.apply_as_courier rather than writing the row: a
+       * courier holds no write access to their own profile at all, because
+       * those columns are what the mission and booking guards read (see
+       * migration 0027). The function forces the capacity from the transport
+       * parameter and the employment flags to false.
        */
       async apply(input) {
-        const settingKey = {
-          foot_trolley: 'courier.capacity_foot_trolley',
-          bike_trailer: 'courier.capacity_bike_trailer',
-          cargo_bike: 'courier.capacity_cargo_bike',
-        }[input.transport];
-
+        // The subject is named explicitly: from the API it equals the caller,
+        // and from a system context there is no caller to infer it from
+        // (migration 0033).
         await sql`
-          insert into courier_profiles (user_id, transport, capacity_units, enrolment_proof_ref)
-          values (${input.userId}, ${input.transport},
-                  app.setting_int(${settingKey}), ${input.enrolmentProofRef})
-          on conflict (user_id) do update
-            set transport = excluded.transport,
-                capacity_units = excluded.capacity_units,
-                enrolment_proof_ref = excluded.enrolment_proof_ref`;
-
-        await sql`
-          update users set roles = array(select distinct unnest(roles || 'courier'::user_role))
-           where id = ${input.userId}`;
+          select app.apply_as_courier(${input.transport}::transport_mode,
+                                      ${input.enrolmentProofRef},
+                                      ${input.userId})`;
+        void input.capacityUnits;   // decided by the parameter, never by the caller
       },
 
       async quiz(seed) {
@@ -526,23 +534,19 @@ export function createPostgresDatabase(sql: Sql): Database {
       },
 
       async signContract(courierId) {
-        await sql`
-          update courier_profiles
-             set contract_signed = true, contract_signed_at = now(),
-                 status = (case when dimona_confirmed then 'active' else 'contract_pending' end)::courier_status
-           where user_id = ${courierId}`;
+        await sql`select app.sign_courier_contract(${courierId})`;
       },
 
+      /**
+       * Confirming the Dimona declaration.
+       *
+       * Admin only and journalled: it records that a declaration was actually
+       * made to the ONSS, which is not something a courier may assert about
+       * themselves (migration 0027).
+       */
       async confirmDimona(courierId, adminId) {
-        await sql`
-          update courier_profiles
-             set dimona_confirmed = true, dimona_confirmed_at = now(),
-                 status = (case when contract_signed then 'active' else 'contract_pending' end)::courier_status
-           where user_id = ${courierId}`;
-        await sql`
-          insert into audit.admin_actions (actor_id, actor_role, action, entity, entity_id, reason)
-          values (${adminId}, 'admin', 'confirm_dimona', 'courier_profiles', ${courierId},
-                  'Déclaration Dimona confirmée')`;
+        await sql`select app.confirm_dimona(${courierId})`;
+        void adminId;   // the actor comes from the session, not from an argument
       },
 
       async openShifts(courierId) {
@@ -612,28 +616,15 @@ export function createPostgresDatabase(sql: Sql): Database {
         }));
       },
 
+      /**
+       * Offers addressed to this courier.
+       *
+       * Goes through app.courier_offers, which returns exactly what spec 7.5
+       * says an offer must carry and nothing more: the client's address and
+       * identity only appear once the mission is accepted (migration 0028).
+       */
       async offers(courierId) {
-        const rows = await sql`
-          select mo.id as offer_id, mo.mission_id, mo.score, mo.offered_at,
-                 st.name as store_name, o.reference as order_reference,
-                 a.floor, a.has_lift, m.estimated_bonus_cents,
-                 (select count(*)::int from order_items i where i.order_id = o.id) as item_count,
-                 (select coalesce(sum(i.quantity * p.weight_kg), 0) from order_items i
-                   join products p on p.id = i.product_id where i.order_id = o.id) as weight_kg,
-                 (select app.haversine_m(pos.lat, pos.lon, st.lat, st.lon)
-                    from courier_positions pos
-                   where pos.courier_id = ${courierId}
-                   order by pos.recorded_at desc limit 1) as distance_m
-            from mission_offers mo
-            join missions m on m.id = mo.mission_id
-            join stores st on st.id = m.store_id
-            join mission_orders mord on mord.mission_id = m.id
-            join orders o on o.id = mord.order_id
-            join addresses a on a.id = o.address_id
-           where mo.courier_id = ${courierId}
-             and mo.status = 'offered'
-             and m.courier_id is null
-           order by mo.offered_at desc`;
+        const rows = await sql`select * from app.courier_offers(${courierId})`;
 
         return rows.map(r => ({
           offerId: r['offer_id'] as string,
@@ -643,12 +634,20 @@ export function createPostgresDatabase(sql: Sql): Database {
           storeName: r['store_name'] as string,
           orderReference: r['order_reference'] as string,
           itemCount: Number(r['item_count']),
-          totalWeightKg: Number(r['weight_kg']),
+          totalWeightKg: Number(r['total_weight_kg']),
           floor: Number(r['floor']),
           hasLift: Boolean(r['has_lift']),
           distanceM: r['distance_m'] === null ? null : Number(r['distance_m']),
           estimatedBonusCents: Number(r['estimated_bonus_cents']),
         }));
+      },
+
+      async acceptOffer(offerId) {
+        const [row] = await sql`select * from app.accept_mission_offer(${offerId})`;
+        return {
+          missionId: row!['assigned_mission_id'] as string,
+          orderIds: (row!['assigned_order_ids'] as string[]) ?? [],
+        };
       },
 
       async currentMission(courierId) {
@@ -720,8 +719,13 @@ export function createPostgresDatabase(sql: Sql): Database {
         };
       },
 
+      /**
+       * Goes through app.advance_mission: a courier holds no write access to
+       * the missions table, and the function checks both ownership and that
+       * the step follows the previous one (migration 0031).
+       */
       async setMissionStatus(missionId, status) {
-        await sql`update missions set status = ${status} where id = ${missionId}`;
+        await sql`select app.advance_mission(${missionId}, ${status})`;
       },
 
       async requestSubstitution(input) {

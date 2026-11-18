@@ -144,6 +144,8 @@ export interface Database {
     offer(missionId: string, courierId: string, score: number): Promise<{ id: string }>;
     /** Couriers already offered this mission, in any state. */
     offeredCouriers(missionId: string): Promise<readonly string[]>;
+    /** Order ids carried by a mission; a mission groups at most two (spec 15). */
+    missionOrderIds(missionId: string): Promise<readonly string[]>;
     respondToOffer(offerId: string, status: 'accepted' | 'declined' | 'expired', reason?: string): Promise<void>;
     assign(missionId: string, courierId: string, shiftBookingId: string | null): Promise<void>;
     activeShiftBooking(courierId: string): Promise<string | null>;
@@ -187,6 +189,8 @@ export interface Database {
     bookings(courierId: string): Promise<readonly BookingRow[]>;
 
     offers(courierId: string): Promise<readonly OfferRow[]>;
+    /** Atomic acceptance: the first courier wins, the others are told (spec 15). */
+    acceptOffer(offerId: string): Promise<{ missionId: string; orderIds: readonly string[] }>;
     currentMission(courierId: string): Promise<MissionDetailRow | null>;
     setMissionStatus(missionId: string, status: string): Promise<void>;
 

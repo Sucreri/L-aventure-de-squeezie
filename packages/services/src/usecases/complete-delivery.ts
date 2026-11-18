@@ -8,7 +8,7 @@
 
 import type { Database } from '../ports/database.ts';
 import type { NotificationSender } from '../ports/notifications.ts';
-import { refusalAware, RuleRefusedError } from '../errors.ts';
+import { refusalAware, RuleRefusedError, translateDatabaseError } from '../errors.ts';
 
 export interface DeliveryDeps {
   readonly db: Database;
@@ -91,9 +91,12 @@ export async function completeHandover(
     await deps.db.delivery.deliver(input.orderId, input.courierId, input.pin);
     return { delivered: true, message: 'Commande livrée.' };
   } catch (error) {
+    // A refusal here is the system working: no age check, or a wrong PIN.
+    // The courier is told which, so they know what to do next — not handed a
+    // 500 at someone's door.
     const refusal = error instanceof RuleRefusedError
       ? error
-      : (await import('../errors.ts')).translateDatabaseError(error);
+      : translateDatabaseError(error);
 
     if (refusal) {
       return { delivered: false, message: refusal.userMessage };

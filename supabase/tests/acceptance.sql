@@ -55,6 +55,35 @@ begin
 end;
 $$;
 
+/**
+ * A brand-new courier, ready to work.
+ *
+ * Reusing a demo courier makes any test that books a shift depend on the
+ * hours earlier tests already booked for them — and the working-time guard
+ * then refuses for reasons that have nothing to do with the test.
+ */
+create or replace function test.new_courier(p_transport transport_mode default 'cargo_bike')
+returns uuid language plpgsql as $$
+declare
+  id uuid := gen_random_uuid();
+begin
+  insert into users (id, roles, first_name, last_name, email, age_bracket, age_verified,
+                     verification_method, verified_at, status)
+  values (id, array['client','courier']::user_role[], 'Palettier', 'Test',
+          'courier-' || substr(id::text, 1, 8) || '@example.invalid',
+          'b18_plus', true, 'itsme', now(), 'active');
+
+  insert into courier_profiles (user_id, transport, capacity_units, training_passed_at,
+                                contract_signed, contract_signed_at,
+                                dimona_confirmed, dimona_confirmed_at, status)
+  values (id, p_transport,
+          case p_transport when 'foot_trolley' then 3 when 'bike_trailer' then 4 else 6 end,
+          now(), true, now(), true, now(), 'active');
+
+  return id;
+end;
+$$;
+
 -- Asserts that a statement is accepted.
 create or replace function test.accepts(p_criterion text, p_label text, p_sql text)
 returns void language plpgsql as $$
@@ -601,21 +630,11 @@ begin
   -- §14 : l'app empêche de réserver au-delà des durées maximales.
   declare
     marathon uuid;
-    courier uuid := gen_random_uuid();
+    courier uuid;
     long_shift uuid;
     max_day integer := app.setting_int('work.max_hours_per_day');
   begin
-    -- Un palettier neuf : réutiliser un palettier de démonstration ferait
-    -- compter les heures des tests précédents et testerait autre chose.
-    insert into users (id, roles, first_name, last_name, email, age_bracket, age_verified,
-                       verification_method, verified_at, status)
-    values (courier, array['client','courier']::user_role[], 'Durée', 'Maximale',
-            'maxhours@example.invalid', 'b18_plus', true, 'itsme', now(), 'active');
-
-    insert into courier_profiles (user_id, transport, capacity_units, training_passed_at,
-                                  contract_signed, contract_signed_at,
-                                  dimona_confirmed, dimona_confirmed_at, status)
-    values (courier, 'cargo_bike', 6, now(), true, now(), true, now(), 'active');
+    courier := test.new_courier();
 
     insert into shifts (zone_id, starts_at, ends_at, places, published_by)
     values (zone, (tomorrow || ' 08:00+01')::timestamptz,
@@ -635,6 +654,50 @@ begin
              marathon, courier),
       'hours per day');
   end;
+end;
+$$;
+
+-- Un palettier ne peut pas s'attribuer lui-même contrat et Dimona (§4.3).
+do $$
+declare
+  target uuid;
+  before_state text;
+  after_state text;
+begin
+  select user_id into target from courier_profiles order by created_at limit 1;
+
+  update courier_profiles
+     set contract_signed = false, contract_signed_at = null,
+         dimona_confirmed = false, dimona_confirmed_at = null, status = 'applied'
+   where user_id = target;
+
+  select contract_signed || '/' || dimona_confirmed || '/' || status
+    into before_state from courier_profiles where user_id = target;
+
+  -- Tentative d'élévation sous sa propre identité.
+  perform set_config('app.current_user_id', target::text, true);
+  begin
+    set local role authenticated;
+    update courier_profiles
+       set contract_signed = true, dimona_confirmed = true, status = 'active'
+     where user_id = target;
+  exception when others then
+    null;   -- un refus explicite convient tout autant
+  end;
+  reset role;
+
+  select contract_signed || '/' || dimona_confirmed || '/' || status
+    into after_state from courier_profiles where user_id = target;
+
+  perform test.ok('4.3', 'un palettier ne peut pas se déclarer sous contrat et Dimona confirmée',
+    after_state = before_state,
+    format('avant %s, après %s', before_state, after_state));
+
+  -- Remise en état pour la suite de la suite.
+  update courier_profiles
+     set contract_signed = true, contract_signed_at = now(),
+         dimona_confirmed = true, dimona_confirmed_at = now(), status = 'active'
+   where user_id = target;
 end;
 $$;
 
@@ -724,8 +787,9 @@ declare
   admin_id uuid := '44444444-0000-0000-0000-000000000001';
   day_soon date := (now() + interval '1 day')::date;
 begin
-  select cp.user_id into courier from courier_profiles cp where cp.status = 'active'
-   order by cp.user_id desc limit 1;
+  -- Un palettier neuf : les heures des tests précédents déclencheraient
+  -- autrement le garde-fou de durée maximale.
+  courier := test.new_courier();
 
   insert into consents (user_id, consent_type, granted) values (courier, 'geolocation', false);
 

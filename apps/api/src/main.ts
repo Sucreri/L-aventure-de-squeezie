@@ -10,7 +10,9 @@
 
 import { createServer } from 'node:http';
 import postgres from 'postgres';
-import { MockPaymentProvider, MockAgeVerificationProvider } from '@palette/services';
+import {
+  MockPaymentProvider, MockAgeVerificationProvider, MockReceiptReader,
+} from '@palette/services';
 import { buildRouter } from './server.ts';
 import { createRequestListener } from './http.ts';
 
@@ -36,6 +38,7 @@ const router = buildRouter({
   sql,
   payments: new MockPaymentProvider(process.env['PAYMENT_WEBHOOK_SECRET'] ?? 'dev-secret'),
   ageVerification: new MockAgeVerificationProvider(),
+  receipts: new MockReceiptReader(),
   tokenSecret: tokenSecret ?? 'dev-only-secret-not-for-production',
   publicBaseUrl,
 });

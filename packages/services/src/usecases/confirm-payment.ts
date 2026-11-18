@@ -9,11 +9,15 @@
 
 import type { Database } from '../ports/database.ts';
 import type { PaymentProvider } from '../ports/payment.ts';
+import type { Clock } from '../ports/clock.ts';
+import { systemClock } from '../ports/clock.ts';
+import { startDispatch } from './dispatch.ts';
 import { refusalAware } from '../errors.ts';
 
 export interface ConfirmPaymentDeps {
   readonly db: Database;
   readonly payments: PaymentProvider;
+  readonly clock?: Clock;
 }
 
 export interface WebhookOutcome {
@@ -70,7 +74,28 @@ export async function handlePaymentWebhook(
     await refusalAware(() => deps.db.orders.setStatus(order.id, 'SEARCHING_COURIER',
       { id: null, role: 'system', reason: 'recherche d\'un palettier' }));
 
-    return { handled: true, reason: 'paiement confirmé', orderId: order.id, newStatus: 'SEARCHING_COURIER' };
+    // And it starts HERE, not on a timer somewhere: a paid order that sits
+    // waiting for a scheduler is an order nobody is looking for.
+    //
+    // Finding nobody is not a failure of the payment. The order stays in
+    // SEARCHING_COURIER, a scheduler retries, and after
+    // cancellation.no_courier_timeout_s the client may cancel free of charge
+    // (spec 12). So a dispatch failure is reported, never thrown.
+    let dispatched: string | undefined;
+    try {
+      const outcome = await startDispatch(
+        { db: deps.db, clock: deps.clock ?? systemClock }, order.id);
+      dispatched = outcome.kind;
+    } catch (error) {
+      dispatched = `erreur d'attribution : ${(error as Error).message}`;
+    }
+
+    return {
+      handled: true,
+      reason: `paiement confirmé (attribution : ${dispatched})`,
+      orderId: order.id,
+      newStatus: 'SEARCHING_COURIER',
+    };
   }
 
   if (event.status === 'failed' || event.status === 'cancelled') {
