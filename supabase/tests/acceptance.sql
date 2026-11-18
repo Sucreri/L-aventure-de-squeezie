@@ -534,8 +534,11 @@ begin
   values (nocontract, array['client','courier']::user_role[], 'Sans', 'Contrat',
           'nocontract@example.invalid', 'b18_plus', true, 'itsme', now(), 'active');
 
-  insert into courier_profiles (user_id, transport, capacity_units, contract_signed, dimona_confirmed, status)
-  values (nocontract, 'foot_trolley', 3, false, false, 'applied');
+  -- Formation validée, mais ni contrat ni Dimona : chaque condition est
+  -- testée séparément, sinon un refus pour le mauvais motif passerait inaperçu.
+  insert into courier_profiles (user_id, transport, capacity_units, training_passed_at,
+                                contract_signed, dimona_confirmed, status)
+  values (nocontract, 'foot_trolley', 3, now(), false, false, 'applied');
 
   perform test.refuses('20.6', 'aucune mission sans contrat signé ni Dimona confirmée',
     format($q$insert into missions (courier_id, store_id) values (%L, %L)$q$, nocontract, store),
@@ -545,6 +548,26 @@ begin
     format($q$insert into shift_bookings (shift_id, courier_id)
              values ((select id from shifts limit 1), %L)$q$, nocontract),
     'contract or dimona missing');
+
+  -- §7.2 : la formation obligatoire est une condition distincte du contrat.
+  declare
+    untrained uuid := gen_random_uuid();
+  begin
+    insert into users (id, roles, first_name, last_name, email, age_bracket, age_verified,
+                       verification_method, verified_at, status)
+    values (untrained, array['client','courier']::user_role[], 'Sans', 'Formation',
+            'untrained@example.invalid', 'b18_plus', true, 'itsme', now(), 'active');
+
+    insert into courier_profiles (user_id, transport, capacity_units, training_passed_at,
+                                  contract_signed, contract_signed_at,
+                                  dimona_confirmed, dimona_confirmed_at, status)
+    values (untrained, 'foot_trolley', 3, null, true, now(), true, now(), 'active');
+
+    perform test.refuses('20.6', 'un palettier sans formation validée ne peut pas réserver',
+      format($q$insert into shift_bookings (shift_id, courier_id)
+               values ((select id from shifts limit 1), %L)$q$, untrained),
+      'mandatory training');
+  end;
 
   -- A courier cannot be set active without both elements.
   perform test.refuses('20.6', 'un profil palettier ne peut pas être actif sans contrat ni Dimona',
@@ -574,6 +597,44 @@ begin
 
   perform test.ok('20.6', 'la dérogation est journalisée',
     exists (select 1 from audit.settings_history where key = 'shift.night_derogation'));
+
+  -- §14 : l'app empêche de réserver au-delà des durées maximales.
+  declare
+    marathon uuid;
+    courier uuid := gen_random_uuid();
+    long_shift uuid;
+    max_day integer := app.setting_int('work.max_hours_per_day');
+  begin
+    -- Un palettier neuf : réutiliser un palettier de démonstration ferait
+    -- compter les heures des tests précédents et testerait autre chose.
+    insert into users (id, roles, first_name, last_name, email, age_bracket, age_verified,
+                       verification_method, verified_at, status)
+    values (courier, array['client','courier']::user_role[], 'Durée', 'Maximale',
+            'maxhours@example.invalid', 'b18_plus', true, 'itsme', now(), 'active');
+
+    insert into courier_profiles (user_id, transport, capacity_units, training_passed_at,
+                                  contract_signed, contract_signed_at,
+                                  dimona_confirmed, dimona_confirmed_at, status)
+    values (courier, 'cargo_bike', 6, now(), true, now(), true, now(), 'active');
+
+    insert into shifts (zone_id, starts_at, ends_at, places, published_by)
+    values (zone, (tomorrow || ' 08:00+01')::timestamptz,
+                  (tomorrow || ' 15:00+01')::timestamptz, 5, admin_id)
+    returning id into long_shift;
+
+    insert into shift_bookings (shift_id, courier_id) values (long_shift, courier);
+
+    insert into shifts (zone_id, starts_at, ends_at, places, published_by)
+    values (zone, (tomorrow || ' 15:30+01')::timestamptz,
+                  (tomorrow || ' 18:30+01')::timestamptz, 5, admin_id)
+    returning id into marathon;
+
+    perform test.refuses('20.6',
+      format('aucune réservation au-delà de %s h par jour (§14)', max_day),
+      format($q$insert into shift_bookings (shift_id, courier_id) values (%L, %L)$q$,
+             marathon, courier),
+      'hours per day');
+  end;
 end;
 $$;
 

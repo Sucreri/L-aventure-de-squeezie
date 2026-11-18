@@ -456,6 +456,352 @@ export function createPostgresDatabase(sql: Sql): Database {
       },
     },
 
+    courier: {
+      async profile(courierId) {
+        const [row] = await sql`
+          select * from courier_profiles where user_id = ${courierId}`;
+        if (!row) return null;
+        return {
+          userId: row['user_id'] as string,
+          courierModel: row['courier_model'] as string,
+          transport: row['transport'] as 'foot_trolley' | 'bike_trailer' | 'cargo_bike',
+          capacityUnits: Number(row['capacity_units']),
+          trainingPassedAt: row['training_passed_at'] as Date | null,
+          contractSigned: Boolean(row['contract_signed']),
+          dimonaConfirmed: Boolean(row['dimona_confirmed']),
+          status: row['status'] as string,
+        };
+      },
+
+      /**
+       * Applying as a courier.
+       *
+       * The capacity comes from the parameter for the declared transport, not
+       * from the applicant: spec 14 fixes it per transport mode, and letting
+       * someone claim their own capacity would let them take more than they
+       * can carry.
+       */
+      async apply(input) {
+        const settingKey = {
+          foot_trolley: 'courier.capacity_foot_trolley',
+          bike_trailer: 'courier.capacity_bike_trailer',
+          cargo_bike: 'courier.capacity_cargo_bike',
+        }[input.transport];
+
+        await sql`
+          insert into courier_profiles (user_id, transport, capacity_units, enrolment_proof_ref)
+          values (${input.userId}, ${input.transport},
+                  app.setting_int(${settingKey}), ${input.enrolmentProofRef})
+          on conflict (user_id) do update
+            set transport = excluded.transport,
+                capacity_units = excluded.capacity_units,
+                enrolment_proof_ref = excluded.enrolment_proof_ref`;
+
+        await sql`
+          update users set roles = array(select distinct unnest(roles || 'courier'::user_role))
+           where id = ${input.userId}`;
+      },
+
+      async quiz(seed) {
+        const rows = await sql`select * from app.training_quiz(${seed})`;
+        return rows.map(r => ({
+          questionId: r['question_id'] as string,
+          topic: r['topic'] as string,
+          prompt: r['prompt'] as string,
+          choices: r['choices'] as string[],
+        }));
+      },
+
+      async gradeQuiz(courierId, answers) {
+        const [row] = await sql`
+          select * from app.grade_training(${courierId}, ${sql.json(answers)})`;
+        return {
+          score: Number(row!['score']),
+          total: Number(row!['total']),
+          passed: Boolean(row!['passed']),
+          wrong: (row!['wrong'] as Array<Record<string, string>>).map(w => ({
+            questionId: w['question_id']!, prompt: w['prompt']!, explanation: w['explanation']!,
+          })),
+        };
+      },
+
+      async signContract(courierId) {
+        await sql`
+          update courier_profiles
+             set contract_signed = true, contract_signed_at = now(),
+                 status = (case when dimona_confirmed then 'active' else 'contract_pending' end)::courier_status
+           where user_id = ${courierId}`;
+      },
+
+      async confirmDimona(courierId, adminId) {
+        await sql`
+          update courier_profiles
+             set dimona_confirmed = true, dimona_confirmed_at = now(),
+                 status = (case when contract_signed then 'active' else 'contract_pending' end)::courier_status
+           where user_id = ${courierId}`;
+        await sql`
+          insert into audit.admin_actions (actor_id, actor_role, action, entity, entity_id, reason)
+          values (${adminId}, 'admin', 'confirm_dimona', 'courier_profiles', ${courierId},
+                  'Déclaration Dimona confirmée')`;
+      },
+
+      async openShifts(courierId) {
+        const rows = await sql`
+          select s.id, s.zone_id, z.name as zone_name, s.starts_at, s.ends_at,
+                 s.places, s.night_derogation, s.peak_bonus_cents,
+                 (select count(*)::int from shift_bookings b
+                   where b.shift_id = s.id and b.cancelled_at is null) as taken,
+                 exists (select 1 from shift_bookings b
+                          where b.shift_id = s.id and b.courier_id = ${courierId}
+                            and b.cancelled_at is null) as booked_by_me
+            from shifts s
+            join zones z on z.id = s.zone_id
+           where s.cancelled_at is null
+             and s.ends_at > now()
+             and z.status = 'open'
+           order by s.starts_at`;
+
+        return rows.map(r => ({
+          id: r['id'] as string,
+          zoneId: r['zone_id'] as string,
+          zoneName: r['zone_name'] as string,
+          startsAt: r['starts_at'] as Date,
+          endsAt: r['ends_at'] as Date,
+          places: Number(r['places']),
+          taken: Number(r['taken']),
+          nightDerogation: Boolean(r['night_derogation']),
+          peakBonusCents: Number(r['peak_bonus_cents']),
+          bookedByMe: Boolean(r['booked_by_me']),
+        }));
+      },
+
+      async bookShift(shiftId, courierId) {
+        const [row] = await sql`
+          insert into shift_bookings (shift_id, courier_id)
+          values (${shiftId}, ${courierId})
+          on conflict (shift_id, courier_id) do update set cancelled_at = null
+          returning id`;
+        return { bookingId: row!['id'] as string };
+      },
+
+      async cancelBooking(shiftId, courierId) {
+        const result = await sql`
+          update shift_bookings set cancelled_at = now()
+           where shift_id = ${shiftId} and courier_id = ${courierId} and cancelled_at is null`;
+        if (result.count === 0) {
+          throw new Error('aucune réservation active à annuler pour ce créneau');
+        }
+      },
+
+      async bookings(courierId) {
+        const rows = await sql`
+          select b.id, b.shift_id, b.cancelled_at, s.starts_at, s.ends_at, z.name as zone_name
+            from shift_bookings b
+            join shifts s on s.id = b.shift_id
+            join zones z on z.id = s.zone_id
+           where b.courier_id = ${courierId}
+           order by s.starts_at desc limit 50`;
+
+        return rows.map(r => ({
+          id: r['id'] as string,
+          shiftId: r['shift_id'] as string,
+          startsAt: r['starts_at'] as Date,
+          endsAt: r['ends_at'] as Date,
+          zoneName: r['zone_name'] as string,
+          cancelledAt: r['cancelled_at'] as Date | null,
+        }));
+      },
+
+      async offers(courierId) {
+        const rows = await sql`
+          select mo.id as offer_id, mo.mission_id, mo.score, mo.offered_at,
+                 st.name as store_name, o.reference as order_reference,
+                 a.floor, a.has_lift, m.estimated_bonus_cents,
+                 (select count(*)::int from order_items i where i.order_id = o.id) as item_count,
+                 (select coalesce(sum(i.quantity * p.weight_kg), 0) from order_items i
+                   join products p on p.id = i.product_id where i.order_id = o.id) as weight_kg,
+                 (select app.haversine_m(pos.lat, pos.lon, st.lat, st.lon)
+                    from courier_positions pos
+                   where pos.courier_id = ${courierId}
+                   order by pos.recorded_at desc limit 1) as distance_m
+            from mission_offers mo
+            join missions m on m.id = mo.mission_id
+            join stores st on st.id = m.store_id
+            join mission_orders mord on mord.mission_id = m.id
+            join orders o on o.id = mord.order_id
+            join addresses a on a.id = o.address_id
+           where mo.courier_id = ${courierId}
+             and mo.status = 'offered'
+             and m.courier_id is null
+           order by mo.offered_at desc`;
+
+        return rows.map(r => ({
+          offerId: r['offer_id'] as string,
+          missionId: r['mission_id'] as string,
+          score: Number(r['score']),
+          offeredAt: r['offered_at'] as Date,
+          storeName: r['store_name'] as string,
+          orderReference: r['order_reference'] as string,
+          itemCount: Number(r['item_count']),
+          totalWeightKg: Number(r['weight_kg']),
+          floor: Number(r['floor']),
+          hasLift: Boolean(r['has_lift']),
+          distanceM: r['distance_m'] === null ? null : Number(r['distance_m']),
+          estimatedBonusCents: Number(r['estimated_bonus_cents']),
+        }));
+      },
+
+      async currentMission(courierId) {
+        const [mission] = await sql`
+          select m.id, m.status, st.name as store_name, st.street, st.number
+            from missions m
+            join stores st on st.id = m.store_id
+           where m.courier_id = ${courierId}
+             and m.status in ('assigned','at_store','purchased','en_route')
+           order by m.assigned_at desc limit 1`;
+
+        if (!mission) return null;
+
+        const orders = await sql`
+          select o.id, o.reference, o.status, o.note_for_courier,
+                 a.street, a.number, a.building, a.floor, a.has_lift, a.room, a.instructions,
+                 app.order_contains_alcohol(o.id) as contains_alcohol
+            from mission_orders mo
+            join orders o on o.id = mo.order_id
+            join addresses a on a.id = o.address_id
+           where mo.mission_id = ${mission['id']}`;
+
+        const detailed = [];
+        for (const o of orders) {
+          const items = await sql`
+            select i.id, p.name, p.format, i.quantity, i.unit_indicative_price_cents,
+                   i.contains_alcohol_snapshot, i.substitution_rule, i.fulfilled, i.refunded
+              from order_items i join products p on p.id = i.product_id
+             where i.order_id = ${o['id']}`;
+
+          detailed.push({
+            orderId: o['id'] as string,
+            reference: o['reference'] as string,
+            status: o['status'] as string,
+            street: o['street'] as string,
+            number: o['number'] as string,
+            building: o['building'] as string | null,
+            floor: Number(o['floor']),
+            hasLift: Boolean(o['has_lift']),
+            room: o['room'] as string | null,
+            instructions: o['instructions'] as string | null,
+            noteForCourier: o['note_for_courier'] as string | null,
+            containsAlcohol: Boolean(o['contains_alcohol']),
+            items: items.map(i => ({
+              orderItemId: i['id'] as string,
+              productName: i['name'] as string,
+              format: i['format'] as string,
+              quantity: Number(i['quantity']),
+              indicativePriceCents: Number(i['unit_indicative_price_cents']),
+              containsAlcohol: Boolean(i['contains_alcohol_snapshot']),
+              substitutionRule: i['substitution_rule'] as string,
+              fulfilled: Boolean(i['fulfilled']),
+              refunded: Boolean(i['refunded']),
+            })),
+          });
+        }
+
+        const [ceiling] = await sql`
+          select app.setting_int('courier.spend_card_ceiling_cents') as v`;
+
+        return {
+          missionId: mission['id'] as string,
+          status: mission['status'] as string,
+          storeName: mission['store_name'] as string,
+          storeStreet: mission['street'] as string,
+          storeNumber: mission['number'] as string,
+          orders: detailed,
+          spendCardCeilingCents: Number(ceiling!['v']),
+        };
+      },
+
+      async setMissionStatus(missionId, status) {
+        await sql`update missions set status = ${status} where id = ${missionId}`;
+      },
+
+      async requestSubstitution(input) {
+        const [row] = await sql`
+          insert into substitution_requests (order_item_id, courier_id, reason,
+                                             proposed_label, proposed_price_cents, expires_at)
+          values (${input.orderItemId}, ${input.courierId}, ${input.reason},
+                  ${input.proposedLabel ?? null}, ${input.proposedPriceCents ?? null},
+                  now())
+          returning *`;
+        return toSubstitution(row!);
+      },
+
+      async resolveSubstitution(requestId, answer) {
+        const [row] = await sql`
+          select (app.resolve_substitution(${requestId},
+            ${answer}::substitution_outcome)).*`;
+        return toSubstitution(row!);
+      },
+
+      async pendingSubstitutions(orderId) {
+        const rows = await sql`
+          select sr.* from substitution_requests sr
+            join order_items i on i.id = sr.order_item_id
+           where i.order_id = ${orderId} and sr.outcome = 'awaiting_client'`;
+        return rows.map(toSubstitution);
+      },
+
+      async recordPosition(input) {
+        await sql`
+          insert into courier_positions (courier_id, shift_booking_id, lat, lon)
+          values (${input.courierId}, ${input.bookingId}, ${input.lat}, ${input.lon})`;
+      },
+
+      async hours(courierId, from, to) {
+        const [row] = await sql`select app.courier_hours(${courierId}, ${from}, ${to}) as v`;
+        return Number(row!['v']);
+      },
+
+      async quotaStatus(courierId) {
+        const [row] = await sql`select * from app.courier_quota_status(${courierId})`;
+        return {
+          year: Number(row!['year']),
+          hoursWithOperator: Number(row!['hours_with_operator']),
+          quotaHours: Number(row!['quota_hours']),
+          alertThresholdHours: Number(row!['alert_threshold_hours']),
+          alerting: Boolean(row!['alerting']),
+        };
+      },
+
+      async earnings(courierId, from, to) {
+        const [row] = await sql`
+          select * from app.courier_earnings_estimate(${courierId}, ${from}, ${to})`;
+        return {
+          hours: Number(row!['hours']),
+          hourlyWageCents: Number(row!['hourly_wage_cents']),
+          wageCents: Number(row!['wage_cents']),
+          deliveries: Number(row!['deliveries']),
+          deliveryBonusCents: Number(row!['delivery_bonus_cents']),
+          floorBonusCents: Number(row!['floor_bonus_cents']),
+          tipsCents: Number(row!['tips_cents']),
+          totalCents: Number(row!['total_cents']),
+        };
+      },
+
+      async recallAction(actionId) {
+        const [row] = await sql`
+          select kind, result from courier_actions where action_id = ${actionId}`;
+        return row ? { kind: row['kind'] as string, result: row['result'] } : null;
+      },
+
+      async rememberAction(input) {
+        await sql`
+          insert into courier_actions (action_id, courier_id, kind, result)
+          values (${input.actionId}, ${input.courierId}, ${input.kind},
+                  ${sql.json(input.result as object)})
+          on conflict (action_id) do nothing`;
+      },
+    },
+
     users: {
       async recordVerification(input) {
         await sql`
@@ -473,6 +819,18 @@ export function createPostgresDatabase(sql: Sql): Database {
   };
 
   return db;
+}
+
+function toSubstitution(r: Record<string, unknown>) {
+  return {
+    id: r['id'] as string,
+    orderItemId: r['order_item_id'] as string,
+    reason: r['reason'] as string,
+    outcome: r['outcome'] as string,
+    askedAt: r['asked_at'] as Date,
+    expiresAt: r['expires_at'] as Date,
+    answeredAt: r['answered_at'] as Date | null,
+  };
 }
 
 export function connect(connectionString: string): Sql {

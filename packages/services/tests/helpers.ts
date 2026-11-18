@@ -131,6 +131,15 @@ export async function couriersOnShift(
   ctx: TestContext,
   count = 3,
 ): Promise<{ courierId: string; bookingId: string }[]> {
+  // Reuse an active shift when there is one. Creating a fresh shift per call
+  // would stack hours on the same couriers and trip the daily working-time
+  // limit — which is the guard doing its job, not a problem to work around.
+  const [existing] = await ctx.sql`
+    select s.id from shifts s
+     where s.zone_id = ${DEMO.zoneBiereau} and s.cancelled_at is null
+       and now() between s.starts_at and s.ends_at
+     order by s.published_at desc limit 1`;
+
   const saved = await ctx.sql`
     select key, value from app_settings
      where key in ('work.service_end_time', 'work.night_work_threshold_time')`;
@@ -139,12 +148,14 @@ export async function couriersOnShift(
     update app_settings set value = '"23:59"'::jsonb
      where key in ('work.service_end_time', 'work.night_work_threshold_time')`;
 
-  const [shift] = await ctx.sql`
-    insert into shifts (zone_id, starts_at, ends_at, places, published_by,
-                        night_derogation, derogation_validated_by, derogation_note)
-    values (${DEMO.zoneBiereau}, now() - interval '1 hour', now() + interval '1 hour',
-            20, ${DEMO.admin}, true, ${DEMO.admin}, 'Fixture de test')
-    returning id`;
+  const [shift] = existing
+    ? [existing]
+    : await ctx.sql`
+        insert into shifts (zone_id, starts_at, ends_at, places, published_by,
+                            night_derogation, derogation_validated_by, derogation_note)
+        values (${DEMO.zoneBiereau}, now() - interval '1 hour', now() + interval '1 hour',
+                20, ${DEMO.admin}, true, ${DEMO.admin}, 'Fixture de test')
+        returning id`;
 
   for (const row of saved) {
     await ctx.sql`update app_settings set value = ${row['value'] as object}

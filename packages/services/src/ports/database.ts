@@ -167,4 +167,184 @@ export interface Database {
     }): Promise<void>;
     activate(userId: string): Promise<void>;
   };
+
+  courier: {
+    profile(courierId: string): Promise<CourierProfileRow | null>;
+    apply(input: {
+      userId: string; transport: TransportMode; capacityUnits: number;
+      enrolmentProofRef: string;
+    }): Promise<void>;
+
+    quiz(seed: number): Promise<readonly QuizQuestionRow[]>;
+    gradeQuiz(courierId: string, answers: Record<string, number>): Promise<QuizResultRow>;
+
+    signContract(courierId: string): Promise<void>;
+    confirmDimona(courierId: string, adminId: string): Promise<void>;
+
+    openShifts(courierId: string): Promise<readonly ShiftRow[]>;
+    bookShift(shiftId: string, courierId: string): Promise<{ bookingId: string }>;
+    cancelBooking(shiftId: string, courierId: string): Promise<void>;
+    bookings(courierId: string): Promise<readonly BookingRow[]>;
+
+    offers(courierId: string): Promise<readonly OfferRow[]>;
+    currentMission(courierId: string): Promise<MissionDetailRow | null>;
+    setMissionStatus(missionId: string, status: string): Promise<void>;
+
+    requestSubstitution(input: {
+      orderItemId: string; courierId: string;
+      reason: 'out_of_stock' | 'price_gap' | 'other';
+      proposedLabel?: string; proposedPriceCents?: number;
+    }): Promise<SubstitutionRow>;
+    resolveSubstitution(requestId: string, answer: string | null): Promise<SubstitutionRow>;
+    pendingSubstitutions(orderId: string): Promise<readonly SubstitutionRow[]>;
+
+    recordPosition(input: {
+      courierId: string; bookingId: string; lat: number; lon: number;
+    }): Promise<void>;
+
+    hours(courierId: string, from: Date, to: Date): Promise<number>;
+    quotaStatus(courierId: string): Promise<QuotaRow>;
+    earnings(courierId: string, from: Date, to: Date): Promise<EarningsRow>;
+
+    /**
+     * Offline replay guard (spec 18).
+     *
+     * Returns the stored result when this action id has already been
+     * performed, so a queued action replayed on reconnection is recognised
+     * rather than applied a second time.
+     */
+    recallAction(actionId: string): Promise<{ kind: string; result: unknown } | null>;
+    rememberAction(input: {
+      actionId: string; courierId: string; kind: string; result: unknown;
+    }): Promise<void>;
+  };
+}
+
+export type TransportMode = 'foot_trolley' | 'bike_trailer' | 'cargo_bike';
+
+export interface CourierProfileRow {
+  readonly userId: string;
+  readonly courierModel: string;
+  readonly transport: TransportMode;
+  readonly capacityUnits: number;
+  readonly trainingPassedAt: Date | null;
+  readonly contractSigned: boolean;
+  readonly dimonaConfirmed: boolean;
+  readonly status: string;
+}
+
+export interface QuizQuestionRow {
+  readonly questionId: string;
+  readonly topic: string;
+  readonly prompt: string;
+  readonly choices: readonly string[];
+}
+
+export interface QuizResultRow {
+  readonly score: number;
+  readonly total: number;
+  readonly passed: boolean;
+  readonly wrong: readonly { questionId: string; prompt: string; explanation: string }[];
+}
+
+export interface ShiftRow {
+  readonly id: string;
+  readonly zoneId: string;
+  readonly zoneName: string;
+  readonly startsAt: Date;
+  readonly endsAt: Date;
+  readonly places: number;
+  readonly taken: number;
+  readonly nightDerogation: boolean;
+  readonly peakBonusCents: Cents;
+  readonly bookedByMe: boolean;
+}
+
+export interface BookingRow {
+  readonly id: string;
+  readonly shiftId: string;
+  readonly startsAt: Date;
+  readonly endsAt: Date;
+  readonly zoneName: string;
+  readonly cancelledAt: Date | null;
+}
+
+export interface OfferRow {
+  readonly offerId: string;
+  readonly missionId: string;
+  readonly score: number;
+  readonly offeredAt: Date;
+  readonly storeName: string;
+  readonly orderReference: string;
+  readonly itemCount: number;
+  readonly totalWeightKg: number;
+  readonly floor: number;
+  readonly hasLift: boolean;
+  readonly distanceM: number | null;
+  readonly estimatedBonusCents: Cents;
+}
+
+export interface MissionItemRow {
+  readonly orderItemId: string;
+  readonly productName: string;
+  readonly format: string;
+  readonly quantity: number;
+  readonly indicativePriceCents: Cents;
+  readonly containsAlcohol: boolean;
+  readonly substitutionRule: string;
+  readonly fulfilled: boolean;
+  readonly refunded: boolean;
+}
+
+export interface MissionDetailRow {
+  readonly missionId: string;
+  readonly status: string;
+  readonly storeName: string;
+  readonly storeStreet: string;
+  readonly storeNumber: string;
+  readonly orders: readonly {
+    orderId: string;
+    reference: string;
+    status: string;
+    street: string;
+    number: string;
+    building: string | null;
+    floor: number;
+    hasLift: boolean;
+    room: string | null;
+    instructions: string | null;
+    noteForCourier: string | null;
+    containsAlcohol: boolean;
+    items: readonly MissionItemRow[];
+  }[];
+  readonly spendCardCeilingCents: Cents;
+}
+
+export interface SubstitutionRow {
+  readonly id: string;
+  readonly orderItemId: string;
+  readonly reason: string;
+  readonly outcome: string;
+  readonly askedAt: Date;
+  readonly expiresAt: Date;
+  readonly answeredAt: Date | null;
+}
+
+export interface QuotaRow {
+  readonly year: number;
+  readonly hoursWithOperator: number;
+  readonly quotaHours: number;
+  readonly alertThresholdHours: number;
+  readonly alerting: boolean;
+}
+
+export interface EarningsRow {
+  readonly hours: number;
+  readonly hourlyWageCents: Cents;
+  readonly wageCents: Cents;
+  readonly deliveries: number;
+  readonly deliveryBonusCents: Cents;
+  readonly floorBonusCents: Cents;
+  readonly tipsCents: Cents;
+  readonly totalCents: Cents;
 }

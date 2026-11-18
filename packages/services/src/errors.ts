@@ -26,6 +26,8 @@ export class RuleRefusedError extends Error {
 
 export type RefusalKind =
   | 'age'
+  | 'training_required'
+  | 'working_time'
   | 'zone_not_open'
   | 'address_outside_area'
   | 'account_not_verified'
@@ -74,6 +76,15 @@ const PATTERNS: readonly { test: RegExp; kind: RefusalKind; message: string }[] 
   { test: /launch parameters are missing/i,
     kind: 'launch_parameters_missing',
     message: "Des paramètres obligatoires ne sont pas renseignés : l'ouverture est bloquée." },
+  { test: /mandatory training has not been passed/i,
+    kind: 'training_required',
+    message: 'La formation obligatoire doit être validée avant de réserver un créneau.' },
+  { test: /exceed the maximum of (\d+) hours per (day|week)/i,
+    kind: 'working_time',
+    message: 'Ce créneau dépasserait la durée maximale de travail autorisée.' },
+  { test: /shift is full/i,
+    kind: 'courier_not_employable',
+    message: "Ce créneau est complet." },
   { test: /signed contract and a confirmed dimona|contract or dimona missing|chk_active_requires_contract_and_dimona/i,
     kind: 'courier_not_employable',
     message: "Ce palettier n'a pas de contrat signé ou de Dimona confirmée." },
@@ -112,7 +123,9 @@ export function translateDatabaseError(error: unknown): RuleRefusedError | null 
   }
 
   // A check constraint we have not named explicitly is still a refusal, not a
-  // crash. Surfacing it as 'unknown' keeps the original text visible.
+  // crash. Surfacing it as 'unknown' keeps the original text visible in
+  // databaseMessage, so a log says which guard fired even when the catalogue
+  // above has not caught up with a new one.
   if (pg.code === '23514' || pg.code === '23505') {
     return new RuleRefusedError('unknown',
       "Cette opération a été refusée par une règle du service.", message, pg.hint);
