@@ -516,7 +516,7 @@ export function createPostgresDatabase(sql: Sql): Database {
           questionId: r['question_id'] as string,
           topic: r['topic'] as string,
           prompt: r['prompt'] as string,
-          choices: r['choices'] as string[],
+          choices: r['choices'] as { id: number; label: string }[],
         }));
       },
 

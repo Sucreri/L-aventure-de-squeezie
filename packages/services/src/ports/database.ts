@@ -237,11 +237,17 @@ export interface CourierProfileRow {
   readonly status: string;
 }
 
+export interface QuizChoice {
+  /** Stable across the shuffle: it is the choice's original position. */
+  readonly id: number;
+  readonly label: string;
+}
+
 export interface QuizQuestionRow {
   readonly questionId: string;
   readonly topic: string;
   readonly prompt: string;
-  readonly choices: readonly string[];
+  readonly choices: readonly QuizChoice[];
 }
 
 export interface QuizResultRow {

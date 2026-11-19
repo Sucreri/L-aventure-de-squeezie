@@ -36,15 +36,15 @@ Trois exemples :
 | a | Comptes, consentements, vérification d'âge, adresses, zones, liste d'attente | ✅ base, service, API et app |
 | b | Catalogue, panier, calcul de prix | ✅ base, service, API et app |
 | c | Paiement, remboursements, reçus | 🟡 règles et écart du §10 faits et testés ; prestataire simulé, intégration Mollie ou Stripe à venir |
-| d | Palettiers : candidature, contrat, créneaux, missions, contrôle d'âge, PIN | 🟡 base et couche service faites ; app palettier à venir |
+| d | Palettiers : candidature, formation, contrat, créneaux, missions, contrôle d'âge, PIN | ✅ base, service, API et app |
 | e | Attribution, suivi temps réel, notifications | 🟡 attribution faite et testée ; temps réel et notifications à venir |
 | f | Back-office, exports de paie et comptables | 🟡 tables, vues et exports faits ; interface à venir |
 | g | Parrainage, codes partenaires, ambassadeurs, commande groupée, notation, incidents | 🟡 base faite ; notation exposée dans l'app, le reste à venir |
 | h | Conservation, droits RGPD, sécurité, accessibilité | ✅ sauf audit d'accessibilité complet |
 | Service | Ports, prestataires simulés, cas d'usage | ✅ |
-| API | Surface HTTP, sous Row Level Security réelle | ✅ parcours client ; routes palettier et admin à venir |
+| API | Surface HTTP, sous Row Level Security réelle | ✅ parcours client et palettier ; routes admin à venir |
 | App client | Expo, vérifiée dans un navigateur | ✅ |
-| App palettier | Créneaux, missions, exécution guidée, hors ligne | ⬜ pas commencé |
+| App palettier | Candidature, formation, contrat, créneaux, missions, exécution guidée, remise, gains | ✅ (file hors ligne écrite, branchement des écrans à finir) |
 | Back-office | Next.js | ⬜ pas commencé |
 
 `COMPLIANCE.md` donne le détail exigence par exigence, avec un statut honnête
@@ -65,11 +65,12 @@ npm run test:all
 
 # ou une par une
 npm test                      # 84 tests du paquet domaine, sans dépendance
-scripts/test-db.sh            # 98 assertions d'acceptation (partie 4 et §20)
+scripts/test-db.sh            # 101 assertions d'acceptation (partie 4 et §20)
 scripts/check-parity.sh       # 24 vérifications de parité SQL ↔ TypeScript
-scripts/test-services.sh      # 45 tests d'intégration de la couche service
-scripts/test-api.sh           # 34 tests de l'API, sous Row Level Security réelle
-scripts/test-app.sh           # 29 vérifications du parcours client, dans Chromium
+scripts/test-services.sh      # 64 tests d'intégration de la couche service
+scripts/test-api.sh           # 51 tests de l'API, sous Row Level Security réelle
+scripts/test-app.sh           # 29 + 39 vérifications des parcours client et
+                              # palettier, dans Chromium
 
 # Lancer en local
 npm run dev:api               # API sur http://localhost:8787
@@ -84,7 +85,7 @@ jamais les captures.
 installe TypeScript (le reste du dépôt n'a aucune dépendance : Node 22 exécute
 les fichiers `.ts` directement et fournit le lanceur de tests).
 
-Les six suites doivent passer. La suite d'acceptation **n'est pas
+Les suites doivent toutes passer. La suite d'acceptation **n'est pas
 idempotente** : elle crée des jeux d'essai et ouvre des quartiers, donc
 `scripts/test-db.sh` reconstruit toujours la base avant de l'exécuter.
 
@@ -108,7 +109,7 @@ docs/
   ARCHITECTURE.md     Décisions structurantes et leur justification
   legal/              12 gabarits juridiques (§4.12)
 supabase/
-  migrations/         23 migrations, appliquées dans l'ordre
+  migrations/         34 migrations, appliquées dans l'ordre
   seed/               Données de démonstration (§20)
   tests/              Suite d'acceptation exécutable
 packages/

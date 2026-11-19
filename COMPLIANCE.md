@@ -23,19 +23,20 @@ l'application, est lui aussi refusé.
 ## Comment exécuter les vérifications
 
 ```bash
-npm run test:all             # enchaîne les cinq suites ci-dessous
+npm run test:all             # enchaîne les suites ci-dessous
 
 scripts/db-reset.sh --seed   # reconstruit la base et charge les données de démonstration
 npm test                     # 84 tests du paquet domaine
-scripts/test-db.sh           # 98 assertions d'acceptation (partie 4 et §20)
+scripts/test-db.sh           # 101 assertions d'acceptation (partie 4 et §20)
 scripts/check-parity.sh      # 24 vérifications de parité SQL ↔ TypeScript
-scripts/test-services.sh     # 45 tests d'intégration de la couche service
-scripts/test-api.sh          # 34 tests de l'API, sous Row Level Security réelle
-scripts/test-app.sh          # 29 vérifications du parcours client, dans un navigateur
+scripts/test-services.sh     # 64 tests d'intégration de la couche service
+scripts/test-api.sh          # 51 tests de l'API, sous Row Level Security réelle
+scripts/test-app.sh          # 29 + 39 vérifications des parcours client et palettier,
+                             # dans un navigateur
 ```
 
-État au moment de la rédaction : **84 + 98 + 24 + 45 + 34 + 29 = 314 vérifications,
-toutes au vert.**
+État au moment de la rédaction : **84 + 101 + 24 + 64 + 51 + 29 + 39 = 392
+vérifications, toutes au vert.**
 
 ---
 
@@ -68,8 +69,10 @@ toutes au vert.**
 | ID | Exigence | Implémentation | Test | Statut |
 |----|----------|----------------|------|--------|
 | C-TRA-01 | Aucune mission sans `contract_signed` **et** `dimona_confirmed` | `trg_mission_assignment`, `trg_shift_booking`, `chk_active_requires_contract_and_dimona` — `0008` | `20.6` (3 assertions distinctes) | ✅ |
-| C-TRA-02 | Contrat d'occupation d'étudiant écrit et signé **avant** la première prestation | `courier_profiles.contract_signed_at`, `chk_contract_timestamp` | `20.6` | ✅ |
-| C-TRA-03 | Suivi des heures et rappel du quota annuel de 650 h | `shift_bookings.worked_from/worked_to` ; paramètres `work.annual_quota_hours`, `work.quota_alert_threshold_hours` | ⬜ calcul et alerte au lot paie | 🟡 |
+| C-TRA-02 | Contrat d'occupation d'étudiant écrit et signé **avant** la première prestation | `courier_profiles.contract_signed_at`, `chk_contract_timestamp` ; signature via `app.sign_courier_contract()`, qui exige la formation | `20.6` ; parcours palettier (contrat affiché puis signé) | ✅ |
+| C-TRA-11 | Formation obligatoire avant toute prestation (§7.2) | `training_questions`, `app.training_quiz()` sans corrigé, `app.grade_training()` côté serveur ; prérequis vérifié par `app.guard_shift_booking()` | `20.6` « un palettier sans formation validée ne peut pas réserver » ; `courier.test.ts` (quiz mélangé) | ✅ |
+| C-TRA-12 | Le palettier ne peut pas s'attribuer contrat ni Dimona | Aucun accès en écriture au profil ; `app.apply_as_courier()`, `app.sign_courier_contract()`, `app.confirm_dimona()` (admin) — migration 0027 | `4.3` « un palettier ne peut pas se déclarer sous contrat et Dimona confirmée » | ✅ |
+| C-TRA-03 | Suivi des heures et rappel du quota annuel de 650 h | `app.courier_hours()`, `app.courier_quota_status()` — les heures comptent le créneau réservé, pas le temps en mission (§11) ; écran « gains » dans l'app | `courier.test.ts` ; parcours palettier : « le quota annuel de 650 h est affiché avec son compteur » | ✅ |
 | C-TRA-04 | Salaire au moins égal au barème applicable | `pay.hourly_wage_cents` **sans valeur par défaut** ; `app.setting_int()` lève une erreur si absent | `20.6` « aucun créneau tant que … n'est pas référencé » | ✅ |
 | C-TRA-05 | Assurance accidents du travail, service externe de prévention, règlement de travail : l'app bloque l'ouverture des créneaux tant qu'ils manquent | `app.guard_shift_publication()` vérifie les 5 paramètres obligatoires | `20.6` (test dédié qui vide le paramètre puis le restaure) | ✅ |
 | C-TRA-06 | Temps de travail, repos et travail de nuit (§14) | `app.guard_shift_publication()` : refus au-delà de `heure_fin_service`, dérogation obligatoire au-delà de 20 h, action journalisée | `20.6` (3 assertions) | ✅ |
@@ -208,13 +211,13 @@ La base de données refuse de publier un document non validé :
 
 ## Résumé honnête de la couverture
 
-Décompte sur les 70 exigences de la partie 4, hors liste des 12 gabarits
+Décompte sur les 72 exigences de la partie 4, hors liste des 12 gabarits
 juridiques (tous en attente de validation) :
 
 | Statut | Nombre d'exigences |
 |--------|--------------------|
-| ✅ implémenté et testé | 41 |
-| 🟡 partiel : base en place, partie applicative à venir | 17 |
+| ✅ implémenté et testé | 44 |
+| 🟡 partiel : base en place, partie applicative à venir | 16 |
 | ⬜ pas encore implémenté | 4 |
 | 📋 hors code, démarche de l'équipe | 8 |
 
@@ -223,6 +226,12 @@ promotions, au droit du travail, à la tarification, à la minimisation des
 données, à la conservation et à l'auditabilité. Ce sont précisément les
 exigences qui, une fois contournées, exposent l'Opérateur à une sanction
 pénale ou à une requalification.
+
+Les deux parcours complets — client et palettier — sont exécutés dans un
+navigateur à chaque passage de la suite, contre l'API et la base réelles.
+C'est ainsi qu'ont été trouvés la plupart des défauts corrigés jusqu'ici :
+une politique RLS trop large, une offre invisible à son destinataire, une
+course entre deux acceptations, un quiz obligatoire impossible à réussir.
 
 **Ce qui reste entièrement devant nous** : l'accessibilité (4.9), la double
 authentification admin (4.8), les parcours de notification et de facturation,

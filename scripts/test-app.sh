@@ -61,6 +61,10 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 
-echo "→ parcours"
-APP_URL="http://localhost:${APP_PORT}" \
-  node "$ROOT/apps/mobile/tests/journey.mjs" ${SHOTS:+--shots "$SHOTS"}
+echo "→ parcours client"
+APP_URL="http://localhost:${APP_PORT}" API_URL="http://localhost:${API_PORT}" \
+  node "$ROOT/apps/mobile/tests/journey.mjs" ${SHOTS:+--shots "$SHOTS/client"}
+
+echo "→ parcours palettier"
+APP_URL="http://localhost:${APP_PORT}" API_URL="http://localhost:${API_PORT}" \
+  node "$ROOT/apps/mobile/tests/courier-journey.mjs" ${SHOTS:+--shots "$SHOTS/palettier"}

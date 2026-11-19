@@ -127,6 +127,43 @@ describe('candidature et prérequis — §7.1 à §7.3', () => {
     assert.match(status.nextStep, /contrat/i);
   });
 
+  test("un quiz mélangé reste réussissable : l'identifiant d'une proposition ne bouge pas",
+    async () => {
+      // Régression. Le quiz mélange les propositions par palettier pour que
+      // répondre par position ne serve à rien. Une version antérieure comparait
+      // l'indice AFFICHÉ à l'indice d'origine : la formation obligatoire était
+      // alors impossible à valider, même en répondant juste partout.
+      const user = await candidate();
+      await applyAsCourier(deps(), {
+        userId: user, transport: 'foot_trolley', enrolmentProofRef: 'ATT-SHUFFLE',
+      });
+
+      const quiz = await ctx.db.courier.quiz(12345);
+      const key = await ctx.sql`
+        select id, choices, correct_index from training_questions where active`;
+      const correctLabel = new Map(key.map(r =>
+        [r['id'] as string, (r['choices'] as string[])[Number(r['correct_index'])]]));
+
+      // On répond comme le ferait un palettier : en choisissant le bon LIBELLÉ
+      // là où il se trouve à l'écran.
+      const answers: Record<string, number> = {};
+      let shuffled = false;
+
+      for (const question of quiz) {
+        const label = correctLabel.get(question.questionId)!;
+        const position = question.choices.findIndex(c => c.label === label);
+        const choice = question.choices[position]!;
+        answers[question.questionId] = choice.id;
+        if (choice.id !== position) shuffled = true;
+      }
+
+      assert.ok(shuffled, "l'ordre d'affichage doit bien être mélangé");
+
+      const result = await submitTraining(deps(), { courierId: user, answers });
+      assert.equal(result.passed, true, 'répondre juste doit suffire à valider');
+      assert.equal(result.score, result.total);
+    });
+
   test('le contrat ne peut pas être signé avant la formation (§7.2, §7.3)', async () => {
     const user = await candidate();
     await applyAsCourier(deps(), {

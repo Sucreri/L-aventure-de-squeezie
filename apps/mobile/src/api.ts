@@ -205,3 +205,175 @@ export const api = {
     request<{ rated: boolean }>(
       `/orders/${id}/rate`, { method: 'POST', token, body: { score, labels, comment } }),
 };
+
+// ---------------------------------------------------------------- courier
+
+export interface OnboardingStatus {
+  applied: boolean;
+  trainingPassed: boolean;
+  contractSigned: boolean;
+  dimonaConfirmed: boolean;
+  status: string;
+  nextStep: string;
+  canWork: boolean;
+}
+
+export interface QuizQuestion {
+  /** camelCase, as the API returns it — not the SQL column name. */
+  questionId: string;
+  topic: string;
+  prompt: string;
+  /**
+   * The order is shuffled per courier; `id` is stable and is what gets
+   * submitted. Answering by position therefore carries no information.
+   */
+  choices: Array<{ id: number; label: string }>;
+}
+
+export interface CourierShift {
+  id: string; zoneName: string; startsAt: string; endsAt: string;
+  places: number; taken: number; nightDerogation: boolean;
+  peakBonusCents: number; bookedByMe: boolean;
+}
+
+export interface MissionOffer {
+  offerId: string; missionId: string; score: number; offeredAt: string;
+  storeName: string; orderReference: string; itemCount: number;
+  totalWeightKg: number; floor: number; hasLift: boolean;
+  distanceM: number | null; estimatedBonusCents: number;
+}
+
+export interface GuidedMission {
+  step: 'go_to_store' | 'shop' | 'pay_and_photograph' | 'travel' | 'handover' | 'done';
+  instruction: string;
+  mission: {
+    missionId: string; status: string; storeName: string;
+    storeStreet: string; storeNumber: string;
+    spendCardCeilingCents: number;
+    orders: Array<{
+      orderId: string; reference: string; status: string;
+      street: string; number: string; building: string | null;
+      floor: number; hasLift: boolean; room: string | null;
+      instructions: string | null; noteForCourier: string | null;
+      containsAlcohol: boolean;
+      items: Array<{
+        orderItemId: string; productName: string; format: string;
+        quantity: number; indicativePriceCents: number;
+        containsAlcohol: boolean; substitutionRule: string;
+        fulfilled: boolean; refunded: boolean;
+      }>;
+    }>;
+  } | null;
+  pendingSubstitutions?: Array<{ id: string; orderItemId: string; expiresAt: string }>;
+}
+
+export interface EarningsSummary {
+  period: { from: string; to: string };
+  estimate: {
+    hours: number; hourlyWageCents: number; wageCents: number;
+    deliveries: number; deliveryBonusCents: number; floorBonusCents: number;
+    tipsCents: number; totalCents: number;
+  };
+  quota: {
+    year: number; hoursWithOperator: number; quotaHours: number;
+    alertThresholdHours: number; alerting: boolean;
+  };
+  disclaimer: string;
+}
+
+export const courierApi = {
+  me: (token: string) =>
+    request<{ onboarding: OnboardingStatus; profile: unknown }>('/courier/me', { token }),
+
+  apply: (token: string, input: { transport: string; enrolmentProofRef: string }) =>
+    request<OnboardingStatus>('/courier/apply', { method: 'POST', token, body: input }),
+
+  training: (token: string) =>
+    request<{ questions: QuizQuestion[] }>('/courier/training', { token }),
+
+  submitTraining: (token: string, answers: Record<string, number>) =>
+    request<{ score: number; total: number; passed: boolean;
+              wrong: Array<{ prompt: string; explanation: string }> }>(
+      '/courier/training', { method: 'POST', token, body: { answers } }),
+
+  contract: (token: string) => request<any>('/courier/contract', { token }),
+
+  signContract: (token: string) =>
+    request<OnboardingStatus>('/courier/contract/sign', { method: 'POST', token }),
+
+  shifts: (token: string) => request<{ shifts: CourierShift[] }>('/courier/shifts', { token }),
+
+  bookShift: (token: string, shiftId: string, actionId?: string) =>
+    request<{ bookingId: string }>(`/courier/shifts/${shiftId}/book`,
+      { method: 'POST', token, body: { actionId } }),
+
+  cancelShift: (token: string, shiftId: string) =>
+    request<{ cancelled: boolean }>(`/courier/shifts/${shiftId}/cancel`,
+      { method: 'POST', token }),
+
+  offers: (token: string) => request<{ offers: MissionOffer[] }>('/courier/offers', { token }),
+
+  acceptOffer: (token: string, offerId: string) =>
+    request<{ kind: string; missionId: string }>(`/courier/offers/${offerId}/accept`,
+      { method: 'POST', token }),
+
+  declineOffer: (token: string, offerId: string, reason?: string) =>
+    request<{ declined: boolean; message: string }>(`/courier/offers/${offerId}/decline`,
+      { method: 'POST', token, body: { reason } }),
+
+  mission: (token: string) => request<GuidedMission>('/courier/mission', { token }),
+
+  atStore: (token: string, missionId: string, actionId?: string) =>
+    request<{ step: string }>('/courier/mission/at-store',
+      { method: 'POST', token, body: { missionId, actionId } }),
+
+  receipt: (token: string, input: {
+    missionId: string; orderId: string; photoPath: string;
+    amountOverrideCents?: number; actionId?: string;
+  }) => request<any>('/courier/mission/receipt', { method: 'POST', token, body: input }),
+
+  /**
+   * Reports a line the shop cannot supply (spec 6.5, 7.6).
+   *
+   * The courier reports; they do not decide. The client answers within the
+   * configured window, and failing that the rule the client chose at checkout
+   * applies — both enforced by the server.
+   */
+  requestSubstitution: (token: string, input: {
+    orderItemId: string; reason: 'out_of_stock' | 'price_gap' | 'other';
+    proposedLabel?: string; actionId?: string;
+  }) => request<{ requestId: string; expiresAt: string; waitSeconds: number }>(
+    '/courier/mission/substitutions', { method: 'POST', token, body: input }),
+
+  applyDefaultSubstitution: (token: string, requestId: string) =>
+    request<{ outcome: string }>(`/courier/mission/substitutions/${requestId}/default`,
+      { method: 'POST', token }),
+
+  depart: (token: string, missionId: string, orderId: string, actionId?: string) =>
+    request<{ step: string }>('/courier/mission/depart',
+      { method: 'POST', token, body: { missionId, orderId, actionId } }),
+
+  arrive: (token: string, orderId: string, actionId?: string) =>
+    request<{ step: string }>('/courier/mission/arrive',
+      { method: 'POST', token, body: { orderId, actionId } }),
+
+  ageCheck: (token: string, orderId: string, input: {
+    documentChecked: boolean; personAppearsSober: boolean; refusalReason?: string;
+  }) => request<{ passed: boolean; next: string; message: string }>(
+    `/courier/orders/${orderId}/age-check`, { method: 'POST', token, body: input }),
+
+  deliver: (token: string, orderId: string, pin: string) =>
+    request<{ delivered: boolean; message: string }>(`/courier/orders/${orderId}/deliver`,
+      { method: 'POST', token, body: { pin } }),
+
+  position: (token: string, lat: number, lon: number) =>
+    request<{ recorded: boolean }>('/courier/position',
+      { method: 'POST', token, body: { lat, lon } }),
+
+  earnings: (token: string, days = 30) =>
+    request<EarningsSummary>(`/courier/earnings?days=${days}`, { token }),
+
+  help: (token: string, description?: string) =>
+    request<{ contact: string; message: string }>('/courier/help',
+      { method: 'POST', token, body: { description } }),
+};

@@ -109,6 +109,16 @@ export default function Home() {
 
       <Divider style={{ marginVertical: spacing.xl }} />
 
+      <Title level={2}>Devenir palettier</Title>
+      <Body muted>
+        Étudiant, salarié, payé à l'heure même quand tu attends, avec 100 % des
+        pourboires. Tu choisis tes créneaux.
+      </Body>
+      <Button label="En savoir plus" variant="secondary"
+              onPress={() => router.push('/palettier')} />
+
+      <Divider style={{ marginVertical: spacing.xl }} />
+
       <Title level={3}>Qui vend</Title>
       <Small muted={false}>{settings.operator.legalName}</Small>
       <Small>{settings.operator.address}</Small>

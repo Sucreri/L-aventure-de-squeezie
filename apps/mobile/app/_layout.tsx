@@ -27,6 +27,14 @@ export default function RootLayout() {
         <Stack.Screen name="recapitulatif" options={{ title: 'Récapitulatif' }} />
         <Stack.Screen name="compte" options={{ title: 'Mon compte' }} />
         <Stack.Screen name="commande/[id]" options={{ title: 'Suivi' }} />
+        <Stack.Screen name="palettier/index" options={{ title: 'Palettier' }} />
+        <Stack.Screen name="palettier/candidature" options={{ title: 'Candidature' }} />
+        <Stack.Screen name="palettier/formation" options={{ title: 'Formation' }} />
+        <Stack.Screen name="palettier/contrat" options={{ title: 'Contrat' }} />
+        <Stack.Screen name="palettier/creneaux" options={{ title: 'Créneaux' }} />
+        <Stack.Screen name="palettier/offres" options={{ title: 'Missions' }} />
+        <Stack.Screen name="palettier/mission" options={{ title: 'Mission' }} />
+        <Stack.Screen name="palettier/gains" options={{ title: 'Gains' }} />
       </Stack>
     </SessionProvider>
   );
