@@ -1,0 +1,30 @@
+# Postgres for local development.
+#
+# The scripts default to port 5433 so this does not collide with a Postgres
+# you may already run on 5432.
+#
+#   docker compose up -d
+#   npm run demo
+#
+# Nothing else in the project needs Docker: the API, the app and the tests all
+# run directly on Node.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: palette-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: uberpalette
+    ports:
+      - "5433:5432"
+    volumes:
+      - palette-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d uberpalette"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  palette-db-data:

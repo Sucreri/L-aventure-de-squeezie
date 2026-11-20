@@ -21,7 +21,9 @@
     "test:api": "scripts/test-api.sh",
     "dev:api": "node --experimental-strip-types apps/api/src/main.ts",
     "test:app": "scripts/test-app.sh",
-    "dev:app": "npm --workspace @palette/mobile run web"
+    "dev:app": "npm --workspace @palette/mobile run web",
+    "demo": "scripts/demo.sh",
+    "demo:admin": "node scripts/demo-admin.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2"

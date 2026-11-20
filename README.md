@@ -50,6 +50,20 @@ Trois exemples :
 `COMPLIANCE.md` donne le détail exigence par exigence, avec un statut honnête
 pour chacune.
 
+## Essayer l'app en quelques minutes
+
+```bash
+npm install
+docker compose up -d      # PostgreSQL sur le port 5433
+npm run demo              # construit l'app, prépare la base, démarre tout
+```
+
+Puis ouvrez **http://localhost:8080**.
+
+`docs/ESSAYER.md` contient une visite guidée des deux parcours, ce qui est
+réel et ce qui est simulé, et comment provoquer les refus pour les voir
+fonctionner.
+
 ## Démarrage
 
 Prérequis : Node ≥ 22.6 (pour l'exécution native de TypeScript) et PostgreSQL 16.
